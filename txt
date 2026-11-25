@@ -1,0 +1,1450 @@
+### Autenticação
+
+`AuthProvider` restaura e distribui a sessão. React Hook Form controla os campos,
+Zod valida os dados e Secure Store persiste apenas o token e o utilizador. Login
+e cadastro comunicam com a API Laravel; nenhuma senha é guardada no dispositivo.
+
+Ao abrir a aplicação, a sessão guardada é validada em `/auth/me`, atualizando os
+papéis e os dados do utilizador. Uma falha de ligação apresenta uma opção para
+repetir a validação; um token rejeitado com `401` é removido. Pedidos autenticados
+que recebem `401` também limpam a sessão atual, sem afetar uma sessão com outro token.
+Sessões locais danificadas são descartadas. Os pedidos HTTP têm um limite de 15 segundos.
+
+O logout chama `/auth/logout` antes de remover a sessão local. Se o servidor estiver
+indisponível, a aplicação apresenta o erro e permite tentar novamente; um token já
+expirado permite concluir a saída.
+
+O cadastro carrega perfis, géneros, tipos de entidade e províncias em
+`/auth/register-options`. Os municípios são carregados depois da escolha da
+província, evitando descarregar dados que o utilizador ainda não precisa.
+
+As rotas `(auth)` usam `Stack.Protected`: ficam disponíveis apenas enquanto não
+existe sessão. Home e categorias continuam públicas, como é comum em marketplaces.
+
+## Catálogo público
+
+A Home consulta `/home` para apresentar categorias e produtos reais. A pesquisa
+abre `/catalog`, que usa `/products` com pesquisa no servidor, categoria,
+promoções, ordenação e paginação de 20 produtos. As categorias vêm de
+`/auxiliary/product-categories`.
+
+A rota `/product/:productId` consulta `/products/:productId` e apresenta galeria,
+descrição e variantes por loja, incluindo preços em AOA, stock e limites de
+quantidade. Imagens relativas usam o disco público `/storage` da API; imagens
+externas HTTP/HTTPS são preservadas. Falhas de imagem apresentam uma alternativa.
+
+As consultas incluem estados de carregamento, ausência de resultados e repetição
+em caso de erro. Os testes usam contratos simulados, sem depender da API local.
+Favoritos continuam reservados para uma etapa seguinte.
+
+## Carrinho
+
+O carrinho usa `/cart` e `/cart/items` para consultar, adicionar, atualizar,
+remover e esvaziar produtos. Cada adição identifica a oferta exata da variante
+numa loja através de `store_product_variant_id`. O servidor valida stock e preço
+e devolve os totais, que são apresentados sem cálculos comerciais locais.
+
+Visitantes recebem um token opaco, guardado separadamente no Secure Store
+(`localStorage` na versão web), enviado em `X-Cart-Token`. Contas de Cliente usam
+o JWT. A primeira consulta autenticada funde o visitante em `/cart/merge`; uma
+falha de rede preserva a credencial para nova tentativa. Outras contas não
+acedem às operações de compra. Trocar de conta elimina o estado visual anterior.
+
+As operações são serializadas para evitar a criação de carrinhos duplicados e
+respostas fora de ordem. Alterações que falham não são repetidas automaticamente:
+a tela permite consultar o estado atual antes de tentar novamente. A API atual
+valida quantidades inteiras positivas contra o stock; os campos informativos
+`min_quantity` e `max_quantity` do catálogo não são impostos pelo serviço de carrinho.
+
+A tela agrupa linhas compactas por loja, com imagem, nome, preço e quantidade.
+O detalhe abre ao tocar no produto; a remoção usa um ícone com confirmação.
+A ação Guardar aparece quando a quantidade ou o preço precisa de confirmação.
+O total e Continuar compra ficam fixos abaixo da lista. Stock é destacado apenas
+quando falta quantidade; atualizar e esvaziar são ações secundárias discretas.
+Alterações de preço são sinalizadas para confirmação ao atualizar a quantidade.
+Entrega e outros encargos são apresentados na revisão do checkout.
+
+## Checkout
+
+No carrinho, **Continuar compra** abre `/checkout`. Visitantes iniciam sessão
+com retorno para a compra; apenas contas de Cliente consultam dados do checkout.
+O checkout organiza Morada, Entrega e Resumo em secções com espaçamento uniforme,
+mensagens contextualizadas e botões principais à largura disponível. Os cartões
+têm cabeçalho com ícone ou número da etapa, separadores discretos e valores
+alinhados à direita. A revisão apresenta miniaturas dos produtos e destaca o total
+num bloco de fundo suave. Valores e
+produtos usam linhas flexíveis, e o formulário ajusta-se ao teclado no iOS.
+É possível escolher uma morada existente ou cadastrar uma nova com província,
+município, endereço e telefone. O fluxo reutiliza as listas geográficas do cadastro.
+
+O mobile consulta `/client/checkout/delivery-options` e exige uma modalidade por
+loja. As tarifas e modalidades vêm da API, incluindo levantamento na loja. A
+revisão usa `/client/checkout/preview` e apresenta produtos, morada, entrega,
+descontos, alterações de preço, total e validade da cotação. O preview não reserva stock. A validade é sincronizada com o cabeçalho Date da
+API para compensar diferenças de relógio entre servidor e telemóvel. Datas ISO
+com precisão superior a milissegundos são normalizadas; se uma data não puder
+ser interpretada, a confirmação deixa a API decidir em vez de indicar uma
+expiração que não foi comprovada. Quando expira, **Gerar novo resumo** reutiliza a
+morada e as entregas escolhidas, pedindo preços e disponibilidade atualizados com
+novas chaves. Confirmações já enviadas continuam a usar **Retomar confirmação**.
+
+A confirmação usa `/client/checkout/confirm`, com modalidade `REFERENCE`, já
+utilizada pelo contrato de testes da Teste-api. O resultado apresenta referência
+da compra, encomendas por loja, total e prazo da reserva como **pendente de pagamento**.
+A referência interna de pagamento não é apresentada como uma referência bancária.
+Esta implementação não efetua pagamentos nem simula aprovações.
+
+Cada tentativa guarda as escolhas e duas chaves distintas: uma para o resumo e
+outra para a confirmação. Estas chaves impedem duplicação ao repetir o mesmo
+pedido. O registo é persistido por conta no Secure Store (localStorage na web),
+sem guardar o JWT. Depois de uma falha de rede ou reinício, **Retomar confirmação**
+envia a mesma chave e o mesmo corpo. Uma confirmação com resultado desconhecido
+não pode ser abandonada para iniciar outra compra nesta tela; primeiro é retomada.
+Uma rejeição definitiva com código 422 permite gerar um novo resumo explicitamente.
+
+Os testes simulam armazenamento e transporte HTTP. Para validar no Expo Go:
+
+1. Adicionar produtos de uma ou várias lojas ao carrinho.
+2. Abrir **Continuar compra** e iniciar sessão como Cliente, se necessário.
+3. Cadastrar ou selecionar uma morada e escolher uma modalidade por loja.
+4. Rever os portes, os produtos, o total e eventuais alterações de preço.
+5. Confirmar apenas com dados de teste: a ação cria encomendas na API.
+6. Verificar a referência e o estado pendente de pagamento; regressar ao carrinho.
+7. Num ambiente de teste, interromper a ligação durante a confirmação e verificar
+   que retomar, incluindo após reinício, recupera a mesma compra sem duplicação.
+
+## As minhas encomendas
+
+Contas de Cliente acedem a **Perfil → As minhas encomendas**. Depois de confirmar
+uma compra, o checkout também oferece **Ver encomenda** e **As minhas encomendas**.
+Visitantes que abrem estas rotas podem iniciar sessão com retorno à listagem.
+
+A lista consulta `/client/order-groups` com páginas de 15 compras, apresentando
+data, total, unidades, lojas e estados separados da compra e do pagamento.
+A atualização pode ser feita puxando a lista para baixo. As páginas seguintes
+são consultadas no servidor, sem acumular compras de páginas anteriores.
+
+O detalhe organiza a identificação da compra, os produtos, a entrega, a morada e
+o pagamento em cartões com cabeçalhos consistentes. Valores ficam alinhados à
+direita, o total recebe destaque e os eventos usam uma linha temporal contínua.
+A referência completa permanece selecionável.
+
+O detalhe consulta `/client/order-groups/{reference}`. Apresenta os produtos
+históricos por loja, quantidades, valores, entrega, morada, resumo e histórico.
+Os estados são traduzidos em português e os totais e moedas são os da API.
+Não é necessário que o produto continue disponível no catálogo.
+
+O acompanhamento consulta `/client/order-groups/{reference}/tracking`, com estado
+atual e histórico por loja. Entrega ao domicílio e levantamento são identificados
+separadamente. A logística tem repetição própria em caso de erro, sem ocultar os
+dados da compra. O detalhe e o acompanhamento dispõem de atualização manual.
+
+As consultas exigem uma conta de Cliente na interface e enviam o JWT para a API,
+que confirma a propriedade da compra. Trocar de conta ou de referência desmonta
+o estado anterior. Referências inválidas são rejeitadas antes do pedido; respostas
+404 apresentam uma mensagem de compra inexistente ou inacessível.
+
+A consulta não cobra pagamentos. No detalhe, o Cliente pode agora emitir códigos
+de levantamento ou entrega quando o estado da encomenda permitir.
+
+Validação manual no Expo Go:
+
+1. Entrar como Cliente e abrir **Perfil → As minhas encomendas**.
+2. Verificar uma lista vazia ou compras existentes, incluindo paginação quando aplicável.
+3. Abrir uma compra e comparar produtos, lojas, moeda e totais com a Teste-api.
+4. Confirmar que estado da compra, pagamento e acompanhamento aparecem separados.
+5. Atualizar o acompanhamento e verificar entrega ou levantamento por loja.
+6. Interromper a ligação e testar a repetição; trocar de conta e verificar o isolamento.
+7. Confirmar uma compra de teste no checkout e abrir **Ver encomenda**.
+
+Os testes automatizados cobrem os contratos HTTP e a apresentação com transporte
+simulado; a navegação e o resultado visual precisam de validação no dispositivo.
+
+## Roadmap
+
+1. Fundação Expo, padrões de código e configuração de ambiente. ✅
+2. Design system básico. ✅
+3. Navegação e estrutura das telas. ✅
+4. Autenticação, cadastro dinâmico e proteção de rotas. ✅
+5. Catálogo público, pesquisa, filtros e detalhes de produto implementados; falta validação num dispositivo com a API em execução.
+6. Carrinho e checkout implementados; falta validação integrada num dispositivo com a Teste-api acessível.
+7. Integração dos restantes fluxos com a API Laravel.
+
+### Correção de validade na Teste-api (13/11/2026)
+
+Foi identificado no MySQL um `ON UPDATE CURRENT_TIMESTAMP` implícito nas
+colunas `expires_at` de `checkout_sessions` e `stock_reservations`. Atualizar os
+totais substituía a validade pela hora atual, tornando o resumo imediatamente
+expirado. A migração `2026_11_13_000001_preserve_checkout_expiration_dates` da
+Teste-api muda essas colunas para `DATETIME`, preservando os valores existentes
+e retirando a atualização automática. As migrações iniciais também foram corrigidas.
+
+Resumos antigos não são prolongados automaticamente. Depois da migração, use
+**Gerar novo resumo**. A correção foi verificada nos testes de checkout e numa
+transação MySQL anulada: a atualização dos totais conservou a validade futura.
+
+## Códigos de levantamento e receção
+
+No detalhe da compra, cada loja apresenta **Gerar código** quando a API permite:
+levantamento com `ISSUE_STORE_PICKUP_CODE`, ou entrega ao domicílio em `IN_TRANSIT`.
+Uma encomenda preparada para entrega ainda aguarda o transporte; preparar não
+significa que já esteja em trânsito. O código deve ser comunicado apenas na receção.
+O lojista/entregador valida o código no respetivo sistema e conclui a receção.
+
+Os códigos ficam apenas em memória, são removidos ao sair da aplicação e não são
+registados em armazenamento ou logs. Cada emissão invalida a anterior. Toques
+repetidos são bloqueados e falhas não provocam repetição automática. A validade
+é comparada com a hora HTTP do servidor, quando disponível, para compensar
+relógios diferentes. A API continua responsável pela validação definitiva.
+
+Validação no Expo Go, com encomendas de teste:
+
+1. Abrir **Perfil → As minhas encomendas**, escolher a compra e atualizar.
+2. Para levantamento pronto, gerar e apresentar o código ao lojista.
+3. Para entrega, confirmar que o botão só aparece em trânsito; apresentar ao entregador.
+4. Gerar novo código e verificar que o anterior deixa de ser aceite na API.
+5. Após a validação pelo lojista/entregador, atualizar a compra e conferir a conclusão.
+6. Verificar falha de rede, expiração e remoção do código ao colocar a app em segundo plano.
+
+Os testes automatizados verificam caminhos autenticados, estados elegíveis,
+validação de identificadores, ausência de repetição automática e validade ajustada.
+A confirmação presencial e o aspeto visual requerem validação no dispositivo.
+
+### Verificação da conclusão da encomenda
+
+A execução conjunta de `CheckoutTest`, `MerchantDashboardTest` e
+`DeliveryPersonPanelTest` na Teste-api passou: **23 testes, 311 asserções**.
+Estes testes usam SQLite em memória e verificam checkout, levantamento pelo
+Cliente, entrega, códigos inválidos e registo da receção. Não substituem a
+validação da encomenda em andamento no Expo Go.
+
+Lacuna identificada: `OrderReceiptService` regista `customer_received_at` e os
+prazos de devolução, mas não atualiza o `order_status` do grupo para `COMPLETED`.
+O acompanhamento por loja identifica a receção, enquanto a compra global pode
+continuar confirmada. Próxima proposta: concluir o grupo apenas depois de todas
+as encomendas das lojas terem receção confirmada, preservando o estado do
+pagamento e evitando duplicação do histórico. Esta correção foi aprovada e implementada; consultar a validação abaixo.
+
+A análise de impacto confirmou que `docs/API_MOBILE_CLIENTE.md` da Teste-api já
+define `COMPLETED` como conclusão de todas as ordens. O mobile já traduz esse
+estado. Pagamentos repetidos já aprovados retornam antes de reiniciar preparação;
+devoluções e reembolsos não usam `OrderGroup.order_status` como critério de acesso.
+Mais 39 testes de pagamentos e pós-venda passaram, com 620 asserções. Estes
+resultados validam o comportamento atual, não a correção, que foi testada posteriormente como descrito abaixo.
+
+Requisitos para a correção: apenas transição de `CONFIRMED` para `COMPLETED`, grupo
+não vazio, receção confirmada de todas as lojas, histórico único e atualização
+atómica que coordene receções simultâneas. Preservar pagamentos, cancelamentos,
+stock, datas de receção e prazos de devolução. Não recalcular compras antigas
+automaticamente. Testar uma loja, várias lojas, modalidades mistas, repetição e
+estados não elegíveis; validar concorrência em MySQL, pois SQLite em memória não
+comprova o comportamento dos bloqueios desse servidor.
+
+### Conclusão global implementada na Teste-api
+
+`OrderReceiptService` conclui apenas grupos `CONFIRMED` quando todas as lojas
+possuem `customer_received_at`. O evento `ORDER_COMPLETED` é registado uma única
+vez e o pagamento é preservado. Receções repetidas mantêm a data original e os
+prazos dos itens; encomendas antigas sem grupo continuam suportadas. Compras
+canceladas ou pendentes não são promovidas a concluídas. Não houve migração nem
+atualização automática de compras antigas.
+
+Levantamento e entrega bloqueiam primeiro o grupo e depois a operação individual,
+e consultam as receções com leitura bloqueante para evitar dados desatualizados.
+Os 68 testes dos seis ficheiros da jornada passaram, com 950 asserções, em SQLite
+em memória. Incluem uma e várias lojas, modalidades mistas, repetição, estados
+não elegíveis, confirmação real do código na rota do lojista e regressões de
+pagamento e pós-venda. A concorrência com duas ligações MySQL e a validação no
+Expo Go permanecem pendentes; os testes SQLite não comprovam esses dois pontos.
+
+### Validação concorrente em MySQL
+
+Executado o serviço real `OrderReceiptService` com dois processos PHP e ligações
+independentes em `REPEATABLE READ`, numa base isolada com as quatro tabelas e
+campos usados pelo serviço. Não é um teste HTTP completo das rotas: os respetivos
+contratos foram cobertos pelos testes da API descritos acima.
+
+Passaram os seguintes cenários:
+
+- Duas receções simultâneas, com leitura anterior ao bloqueio: o segundo processo
+  aguarda efetivamente pelo primeiro e a compra termina com um único histórico.
+- Repetição preserva pagamento, data de receção e prazo de devolução.
+- Uma falha na transação externa reverte receções, estado global e histórico.
+
+Script comentado e reproduzível: `tests/integration/order-completion-mysql.php`.
+Execução manual: `php tests/integration/order-completion-mysql.php /caminho/Teste-api`.
+Requer MySQL/MariaDB, permissão de criação de base e extensão `pcntl`; cria e
+conserva uma nova base isolada em cada execução, sem eliminar bases existentes.
+A configuração da aplicação não é alterada. A execução aprovada passou na base
+`marketplace_completion_check_20261113_061442_362e38`. A primeira tentativa deixou
+uma base de teste adicional sem dados de cenário, após um erro de nome de ligação;
+o script passou a validar nome e base dos modelos antes de inserir dados.
+
+Falta a validação presencial no Expo Go: abrir a encomenda pronta para
+levantamento, gerar código, receber produtos, o lojista validar o código e atualizar
+a compra. O acompanhamento deve mostrar `COLLECTED_BY_CLIENT`; se todas as lojas
+confirmaram a receção, o grupo deve mostrar `COMPLETED`. Não gerar nem validar
+códigos de uma encomenda em andamento automaticamente durante os testes.
+
+### Confirmação manual e próxima etapa
+
+O utilizador informou que realizou a validação no Expo Go após as instruções de
+levantamento e confirmação pelo lojista. Esta validação foi reportada pelo
+utilizador; o agente não observou diretamente o dispositivo.
+
+Próxima proposta: integrar avaliações no detalhe da compra, respeitando os campos
+`can_review` e os identificadores já devolvidos pela API. Classificação de 1 a 5,
+comentário e opção de anonimato, com tratamento de falhas e bloqueio de envios
+repetidos. Não há interface de avaliações implementada nesta análise. A proposta
+aguarda aprovação, incluindo definição de edição de avaliações existentes.
+
+A análise das avaliações identificou uma divergência para levantamento: o detalhe
+permite avaliar o produto após `customer_received_at`, mas o repositório de
+avaliações exige `TransportDelivery::DELIVERED` para produto e loja. Uma compra
+levantada presencialmente pode assim apresentar uma ação que a API rejeita.
+A proposta deve incluir alinhar a elegibilidade de produto/loja com receção
+confirmada, mantendo avaliação de entrega exclusiva de transporte concluído,
+antes de integrar os formulários no mobile. Esta alteração aguarda aprovação.
+
+## Avaliações no detalhe da compra
+
+Após a receção, **Detalhe da compra → A sua opinião conta** permite avaliar cada
+produto, loja e entrega elegível. O formulário apresenta estrelas de 1 a 5,
+comentário opcional até 3000 caracteres e opção de anonimato. A secção mostra a
+classificação e o estado de moderação; **Editar** recupera comentário e anonimato
+originais através de `/client/reviews`. Uma alteração volta a moderação.
+
+Na Teste-api, produto e loja aceitam receção confirmada em
+`customer_received_at`, incluindo levantamento presencial. Entregas históricas
+marcadas `DELIVERED` continuam aceites. A avaliação da transportadora exige entrega
+concluída e não aparece para levantamento. O detalhe e os endpoints de criação
+usam critérios compatíveis; a propriedade da compra continua obrigatória.
+
+A interface bloqueia toques repetidos, preserva o formulário em falhas de envio e
+não repete pedidos automaticamente. Uma resposta 409 recupera a lista para editar
+a avaliação existente. O formulário usa um modal com área segura, teclado e
+rolagem; cada conta conserva apenas os seus dados enquanto autenticada.
+
+Verificações: 54 testes mobile passaram; 65 testes da API passaram com 902
+asserções, cobrindo avaliações e regressão da jornada. Lint e exportação Android
+passaram. Falta validar a interação e o aspeto visual no Expo Go:
+
+1. Abrir uma encomenda recebida e criar avaliação de produto e loja.
+2. Verificar classificação, anonimato e estado de moderação.
+3. Editar e confirmar que comentário e anonimato originais são recuperados.
+4. Testar falha de rede e repetição sem criar outra avaliação.
+5. Confirmar ausência de avaliação de entrega numa compra por levantamento.
+
+Código e funções novos estão comentados em português. Não foram criados modelos,
+campos ou migrações para esta etapa.
+
+### Organização visual das avaliações
+
+O cartão **A sua opinião conta** encerra o detalhe, depois do histórico da compra.
+O cabeçalho usa um destaque suave, os recursos têm ícones discretos de produto,
+loja e entrega, e cada linha é inteiramente tocável. Nome e estado ficam à
+esquerda; Avaliar/Editar e a seta ficam alinhados à direita. A classificação
+existente usa uma pequena estrela, sem acrescentar controlos à consulta da compra.
+As funções e alterações de apresentação estão comentadas. A validação visual
+em ecrãs pequenos e com texto ampliado deve ser feita no Expo Go.
+
+### Texto do acompanhamento para o comprador
+
+O cartão chama-se **Acompanhar encomenda**, abrangendo entrega e levantamento.
+Na aplicação do Cliente, `PICKUP` com `COLLECTED_BY_CLIENT` apresenta
+**Levantamento concluído** e **A loja confirmou que recebeu os seus produtos.**
+A alteração é de apresentação no mobile e mantém os estados devolvidos pela API.
+Validar no Expo Go com uma encomenda levantada; os restantes estados conservam
+os textos da API.
+
+## Pedidos de devolução no mobile
+
+A primeira etapa de devoluções está disponível em **Perfil → Compras → As minhas
+devoluções**. O detalhe da compra também oferece esse acesso, mantendo o cartão
+de avaliações como último elemento da página.
+
+O Cliente pode:
+
+- Consultar os seus pedidos com paginação e atualização ao regressar à lista.
+- Solicitar uma devolução a partir de `/client/returns/eligible-items`, percorrendo
+  as páginas e escolhendo apenas um produto elegível.
+- Indicar quantidade inteira dentro do disponível, motivo e descrição de 10 a
+  5000 caracteres. Prazo e política são os da API; o dispositivo não recalcula a
+  elegibilidade pelo seu relógio.
+- Consultar estado, produto, quantidade, decisão, instruções e histórico.
+- Cancelar quando `allowed_actions` inclui `CANCEL`, indicando um motivo de
+  5 a 1000 caracteres e confirmando explicitamente a ação.
+
+O envio sem anexos usa JSON, aceite pelo controller Laravel e pelos testes HTTP
+existentes. A API revalida propriedade, política, prazo e quantidade no momento
+real do pedido. Esta etapa não inclui anexos, conversa ou escolha do transporte
+de devolução; esses recursos ficam para a etapa seguinte.
+
+A proteção de Cliente foi reutilizada com textos próprios e retorno ao fluxo
+após login. Trocar conta desmonta as consultas e os formulários privados.
+Toques repetidos são bloqueados e nenhuma mutação é repetida automaticamente.
+Se a resposta de criação se perder ou existir erro interno, o formulário bloqueia
+novo envio e encaminha para a lista de pedidos, para consultar o resultado antes
+de iniciar outro pedido. Esse bloqueio pertence ao formulário em memória; a API
+não fornece uma chave de idempotência de criação de devoluções nesta etapa.
+Para cancelamento incerto, a recuperação é uma nova consulta do pedido.
+
+Código, funções e decisões relevantes estão comentados em português. Não foram
+necessárias alterações funcionais na Teste-api para esta etapa.
+
+Verificação executada:
+
+- `npm test`: **62 testes passaram**, incluindo contratos, paginação,
+  elegibilidade, validação, cancelamento permitido e ausência de repetição.
+- `npm run lint` e formatação dos ficheiros alterados.
+- Exportação Android em `/tmp/marketplace-returns` concluída.
+- `ClientReviewTest` na Teste-api: **42 testes, 589 asserções passaram**, em SQLite
+  em memória, incluindo contratos de devolução, quantidade disponível,
+  propriedade e cancelamento.
+
+Falta a validação no Expo Go com dados de teste:
+
+1. Entrar como Cliente e abrir **Perfil → As minhas devoluções**.
+2. Selecionar um produto recebido e elegível; testar quantidades inválidas e
+   descrição curta antes de enviar um pedido válido.
+3. Consultar o detalhe e verificar estado, histórico e referência.
+4. Cancelar um pedido ainda em `REQUESTED` e confirmar a atualização da lista e
+   a reposição da quantidade disponível na API.
+5. Confirmar ausência de cancelamento em estados não autorizados, testar falha
+   de rede e verificar que a troca de conta não mostra pedidos da conta anterior.
+6. Percorrer páginas, quando existirem, e verificar teclado, rolagem e texto
+   ampliado no dispositivo. Os testes automatizados não substituem esta
+   verificação visual e de navegação.
+
+### Falha de validação da sessão no Expo Go
+
+Se aparecer **Não foi possível validar a sessão**, confirmar primeiro o endereço
+público da API. Em dispositivo físico, `php artisan serve` sem `--host` escuta
+apenas em `127.0.0.1`, inacessível ao telemóvel. Arrancar o servidor com
+`php artisan serve --host=0.0.0.0 --port=8000` e usar no `.env` mobile o IP do
+computador na mesma rede. Não usar `127.0.0.1` no mobile físico.
+
+Na verificação de 14/11/2026, a API estava limitada a `127.0.0.1:8000`; foi
+iniciado um segundo listener em `192.168.0.87:8000`, preservando o servidor local.
+O endpoint `/api/home` passou a responder HTTP 200 na rede, e `/api/auth/me`
+respondeu HTTP 401 sem token, como esperado. No Expo Go, tocar em **Tentar
+novamente**. A validação da sessão guardada requer a confirmação no dispositivo.
+
+## Anexos nas devoluções
+
+O formulário apresenta **Anexos — opcional**, com seleção pelo explorador de
+ficheiros do dispositivo, miniaturas das imagens, nome/tamanho e remoção antes
+do envio. São permitidos até **5 ficheiros de 10 MB cada**, JPG/JPEG, PNG, WebP ou
+PDF. Seleções repetidas são ignoradas; uma seleção inválida não elimina as
+anteriores. Se o fornecedor omitir o tamanho, consulta-se a cópia local criada
+pelo seletor. Os ficheiros originais do Cliente não são eliminados.
+
+Com anexos, o pedido usa `multipart/form-data`, com `attachments[0]` e seguintes.
+O cliente HTTP deixa o fetch definir o separador multipart e permite até 120
+segundos de envio. Sem anexos, mantém o contrato JSON. Continua a existir um
+único pedido de criação e nenhuma repetição automática de mutações.
+
+No detalhe, **Anexos do pedido** transfere pelo endpoint privado construído com
+o identificador do anexo e o JWT, ignorando URLs externos. Imagens abrem dentro
+da aplicação; PDFs usam o visualizador do sistema ou uma aplicação escolhida no
+menu de partilha. No navegador é feita uma transferência autenticada para uma
+cópia local/blob, nunca através de uma URL pública com token. Cópias de consulta
+são removidas ao sair do detalhe/trocar de conta; as imagens também são removidas
+ao fechar a pré-visualização. Cópias guardadas pelo próprio Cliente numa aplicação
+externa ficam sob controlo desse Cliente. Downloads tardios não abrem noutra página.
+
+Foram adicionados `expo-document-picker`, `expo-file-system` e `expo-sharing`
+compatíveis com o SDK 58. Referências oficiais: [DocumentPicker](https://docs.expo.dev/versions/latest/sdk/document-picker/),
+[FileSystem](https://docs.expo.dev/versions/latest/sdk/filesystem/) e
+[Sharing](https://docs.expo.dev/versions/latest/sdk/sharing/).
+
+### Limites do servidor de desenvolvimento
+
+O PHP local tinha `upload_max_filesize=2M` e `post_max_size=8M`, insuficientes para
+os limites aceites pela API. O script `scripts/serve-api-mobile.sh` acrescenta
+somente para o processo da API a configuração de
+`scripts/php-config/99-marketplace-uploads.ini`: 10 MB por ficheiro e 55 MB por
+pedido. Não altera o PHP global. `--no-reload` conserva a variável
+`PHP_INI_SCAN_DIR` no processo filho do Laravel; alterações ao `.env` da API
+exigem reiniciar este servidor.
+
+A API de rede foi reiniciada em `192.168.0.87:8000` com esta configuração,
+preservando o servidor de loopback existente. Foi confirmada a herança da
+configuração pelo processo filho e HTTP 200 em `/api/home`.
+Para repetir esse arranque específico, usar:
+
+```bash
+MARKETPLACE_API_HOST=192.168.0.87 bash scripts/serve-api-mobile.sh
+```
+
+### Verificação desta etapa
+
+- **71 testes mobile passaram**, incluindo multipart, validação de anexos,
+  download autenticado, sessão expirada, cópias temporárias e abertura tardia.
+- **44 testes da API / 606 asserções passaram**, em SQLite em memória, incluindo
+  seis anexos rejeitados, ficheiro acima de 10 MB rejeitado, formato inválido,
+  cinco anexos aceites com um PDF de 10 MB e bloqueio de download por outro Cliente.
+- Lint, formatação e exportação Android passaram; a verificação local de
+  dependências do Expo passou com o mapa local de versões.
+
+Falta a validação no Expo Go: adicionar/remover imagens e PDF; enviar um pedido
+de teste; abrir ambos no detalhe; experimentar ficheiros inválidos, limite de
+cinco e falha de rede. Confirmar abertura de PDF no dispositivo, porque depende
+de um visualizador instalado. Se o Expo ainda servir o bundle anterior, reiniciar
+com `npm run start:clear` e voltar a ler o QR Code. Testes automatizados e a
+exportação não substituem a validação visual no dispositivo.
+
+## Conversa da devolução com o Centro Comercial
+
+No detalhe de um pedido existente existe agora **Conversa com o Centro**, antes
+do histórico de estados. O histórico mostra remetente, nome do administrador
+quando disponível, texto, data e anexos. As mensagens do Cliente usam **Eu** e
+ficam alinhadas à direita; as do Centro à esquerda. As últimas dez aparecem
+inicialmente, com **Ver mensagens anteriores** para consultar o restante histórico.
+O ícone de atualização consulta novas mensagens; não existe uma ligação de chat
+em tempo real nesta etapa. A atualização da conversa mantém o rascunho do
+formulário. Atualizar o detalhe completo volta a montar os seus formulários.
+
+O Cliente responde com texto de 2 a 5000 caracteres e até cinco anexos de 10 MB
+cada, usando o seletor já existente. É assim possível enviar fotografias pedidas
+pelo administrador **depois da criação da devolução, no mesmo pedido**, sem criar
+outra devolução. O texto é obrigatório mesmo quando existem imagens.
+
+Contratos reutilizados:
+
+- `GET /client/returns/{id}/messages`: histórico privado cronológico.
+- `POST /client/returns/{id}/messages`: mensagem JSON ou multipart com anexos;
+  a resposta contém o histórico completo.
+- `GET /client/returns/message-attachments/{id}`: cópia privada de anexo de uma
+  mensagem. O identificador nunca é enviado ao endpoint de anexos do pedido,
+  porque são recursos distintos.
+
+Pode enviar nos estados `REQUESTED`, `UNDER_REVIEW`, `APPROVED`, `AWAITING_RETURN`,
+`IN_TRANSIT`, `RECEIVED` e `INSPECTING`. Em `ACCEPTED`, `REFUSED`, `REJECTED` ou
+`CANCELLED`, o histórico e anexos continuam acessíveis e o formulário é ocultado.
+Estados desconhecidos permitem apenas consulta até serem reconhecidos. A API
+revalida o estado e a propriedade no envio; atualizar o estado do pedido recupera
+uma decisão que tenha ocorrido enquanto o formulário estava aberto.
+
+Toques repetidos e operações simultâneas de envio/cancelamento são bloqueados na
+interface. Campos e ficheiros só são limpos depois do envio confirmado. Em falha
+de rede ou resposta incerta, **Verificar envio na conversa** faz apenas GET e
+procura uma nova mensagem do Cliente com o mesmo texto e anexos, excluindo os ids
+já conhecidos. Quando encontrada, confirma o envio e limpa o rascunho; caso
+contrário, mantém-no e exige consulta antes de voltar a editar. Não existe
+reenvio automático nem chave de idempotência na API de mensagens. Uma revisão
+manual do histórico continua necessária antes de um eventual reenvio explícito.
+Trocar de conta/pedido desmonta a conversa e remove cópias temporárias de consulta.
+
+As funcionalidades da API foram reutilizadas; nesta etapa só foi acrescentado um
+teste HTTP de regressão. Código, funções e decisões de implementação estão
+comentados em português. Verificação: **79 testes mobile passaram**, **45 testes
+API / 631 asserções passaram** em SQLite em memória; lint, formatação e exportação
+Android passaram. Os testes cobrem estados, contratos JSON/multipart, ordem e
+união do histórico, recuperação de envio, rotas de anexos e privacidade.
+
+Validação pendente no Expo Go:
+
+1. Abrir **Perfil → As minhas devoluções → Ver pedido → Conversa com o Centro**.
+2. Pelo sistema do Centro, pedir fotografias e confirmar a mensagem no mobile
+   usando o botão de atualização da conversa.
+3. Escrever uma resposta, selecionar fotografias/PDF e enviar. Confirmar que o
+   Centro recebe o texto e os ficheiros no mesmo pedido.
+4. Abrir anexos de ambas as partes e consultar mensagens anteriores.
+5. Atualizar a conversa com um rascunho escrito e confirmar a sua preservação;
+   testar falha de rede e verificação de envio sem duplicação automática.
+6. Encerrar uma devolução de teste no Centro; atualizar o detalhe no mobile e
+   verificar histórico acessível e ausência de formulário de envio.
+
+### Apresentação da conversa no detalhe
+
+O cartão tem agora cabeçalho próprio com ícone de conversa e atualização,
+orientações numa faixa separada e histórico sobre uma superfície neutra. As
+mensagens do Centro e do Cliente usam bolhas opostas, com cantos diferenciados,
+remetente fora da bolha, separadores por dia e hora discreta junto da mensagem.
+O nome do administrador aparece dentro da mensagem quando a API o fornece.
+
+A hierarquia tipográfica diferencia título, instruções (12 px), conteúdo das
+mensagens (15 px), remetentes e horários (10 px), mantendo a família da aplicação
+e o dimensionamento de acessibilidade do sistema. Avisos de envio e erro têm
+tratamento visual próprio, separado do conteúdo da conversa.
+
+A área **A sua resposta** apresenta campo de texto, anexos em modo compacto e
+botão de envio com ícone. O formulário de criação de devolução conserva o seletor
+completo. Esta alteração é de apresentação e mantém os contratos e permissões da
+conversa. Código comentado; validação com testes existentes, lint e exportação
+Android. Falta a confirmação do aspeto visual no Expo Go.
+
+Verificação desta apresentação: 79 testes passaram, lint e exportação Android
+concluídos em `/tmp/marketplace-conversation-polish`. O componente real foi
+inspecionado em pré-visualizações web de 390 px e 320 px, usando exclusivamente
+respostas simuladas, sem sessão ou dados reais. Não foram observados textos ou
+controlos fora do cartão nessas larguras. Capturas de apoio:
+`/tmp/marketplace-chat-layout.png` e `/tmp/marketplace-chat-layout-320.png`.
+Esta inspeção não substitui a validação de fontes, teclado e rolagem no Expo Go.
+
+### Correção do envio de anexos no Expo 58
+
+Foi reproduzida a falha **Não foi possível confirmar o envio**: o SDK 58 instala
+`expo/fetch` como fetch padrão no dispositivo. O formato antigo de anexo nativo
+`{ uri, name, type }` não é aceite pelo seu serializador multipart, que devolve
+`Unsupported FormDataPart implementation` antes de enviar o pedido à API.
+A mensagem sem anexos funcionava porque usa JSON.
+
+`attachmentFormData` passa agora a abrir o ficheiro com `expo-file-system.File`
+e fornece ao fetch um adaptador com `bytes()`, nome original e tipo MIME. No
+navegador mantém o `File` da seleção. Se a cópia local já não existir, o formulário
+pede nova seleção antes de iniciar o upload. A alteração aplica-se tanto aos
+anexos iniciais da devolução como às respostas na conversa. Não há reenvio
+automático de mensagens ou pedidos.
+
+O teste de regressão executa o **serializador real instalado do Expo**, não apenas
+um fetch simulado: demonstra que o formato antigo é rejeitado e que o novo corpo
+contém os bytes, nome e tipo esperados. O código TypeScript do SDK é removido de
+tipos apenas no teste Node. Referência oficial: [upload de File/FormData com
+Expo](https://docs.expo.dev/versions/latest/sdk/filesystem/#uploading-files-using-expofetch).
+
+Verificação: **82 testes passaram**, incluindo regressão do SDK e ficheiro
+indisponível na cache. Lint, formatação e exportação Android verificados.
+A seleção e o envio reais ainda precisam de confirmação no Expo Go. Recarregar a
+aplicação, verificar o histórico para evitar repetição e voltar a selecionar o
+anexo antes de testar o envio. Se o bundle antigo permanecer, reiniciar o Expo
+com `npm run start:clear`.
+
+### Espaçamento e identificação por sequência na conversa
+
+O histórico usa um intervalo menor entre mensagens. **Eu** ou **Centro Comercial**
+e o nome do administrador aparecem apenas no início de uma sequência do mesmo
+remetente. A identificação reaparece quando muda a pessoa ou o dia, e também no
+primeiro item visível ao consultar mensagens anteriores. As horas continuam
+junto de cada mensagem. A alteração é de apresentação e está comentada no código.
+
+Verificação deste ajuste: 82 testes, lint, formatação e exportação Android
+passaram (`/tmp/marketplace-conversation-grouped`). Falta validar o espaçamento
+no Expo Go com mensagens consecutivas do mesmo remetente.
+
+### Preparação da cópia local no Android
+
+O aviso de ficheiro indisponível estava a ser mostrado durante a verificação do
+URI devolvido pelo seletor, antes do envio. `File.exists` também pode ser falso
+quando a localização não é legível pela área da aplicação; esse resultado não
+prova que o Cliente apagou o ficheiro.
+
+No Android, o seletor entrega agora o `content://` autorizado com
+`copyToCacheDirectory: false`. A aplicação copia imediatamente o conteúdo para
+`Paths.cache` e só depois adiciona o anexo ao formulário. O envio usa essa cópia,
+com nome original, MIME e tamanho validado. Em iOS mantém-se a cópia inicial do
+seletor; em web mantém-se o File fornecido pelo navegador. Referências oficiais:
+[DocumentPicker](https://docs.expo.dev/versions/latest/sdk/document-picker/) e
+[FileSystem](https://docs.expo.dev/versions/latest/sdk/filesystem/).
+
+A preparação é assíncrona, e o botão de envio permanece bloqueado enquanto se
+preparam os ficheiros. Cópias rejeitadas, repetidas ou removidas são limpas. Ao
+sair do formulário, as cópias restantes são libertadas por um registo que conhece
+apenas os ficheiros criados pela aplicação. Os originais escolhidos pelo Cliente
+não são eliminados. Uma falha de cópia conserva os anexos anteriores e apresenta
+uma mensagem de seleção, em vez de iniciar um upload inválido.
+
+Verificação: **84 testes passaram**, incluindo preparação de `content://` para
+cache própria, limpeza após falha e proteção do URI original; lint, formatação e
+exportação Android. As operações nativas de cópia são simuladas nos testes Node;
+a validação real continua pendente no dispositivo Android. Recarregar completamente
+a aplicação, selecionar novamente o ficheiro e testar o envio na conversa. Um
+rascunho mantido pelo Fast Refresh pode ainda apontar para uma cópia anterior.
+
+O utilizador confirmou que o envio passou no dispositivo Android após o ajuste
+de preparação da cópia local. Esta confirmação foi reportada pelo utilizador;
+o agente não observou diretamente o dispositivo.
+
+### Modalidade e acompanhamento da devolução
+
+Etapa autorizada pelo utilizador e implementada no detalhe da devolução:
+
+- Em `AWAITING_RETURN`, a escolha só aparece com `CHOOSE_DELIVERY_METHOD` ou
+  `SELECT_RETURN_METHOD` na logística cancelada. Entrega na loja envia apenas
+  `STORE_DROPOFF`; recolha envia `CARRIER_PICKUP` e uma morada da conta.
+- A seleção reutiliza `/client/addresses`. Nesta etapa escolhem-se moradas já
+  guardadas; criação e correção de moradas dentro da devolução ficam para uma
+  etapa própria. Sem moradas, a interface explica a situação.
+- O acompanhamento consulta `/client/returns/{id}/delivery`, mostra a modalidade,
+  estado, orientação da API, loja de destino, morada e histórico. Entrega à loja
+  não significa devolução aceite nem reembolso confirmado.
+- Códigos só são emitidos por toque, com `ISSUE_DROPOFF_CODE` ou
+  `ISSUE_PICKUP_CODE`. O prazo usa a data HTTP do servidor para compensar diferenças
+  de relógio. O segredo fica em memória, desaparece ao sair da aplicação e não é
+  reposto por uma resposta tardia. Uma nova emissão invalida a anterior.
+- Confirmações bloqueiam toques repetidos e atualização do detalhe. Uma falha
+  ambígua na escolha exige consultar o estado, sem repetir automaticamente o POST.
+  A API continua a validar propriedade, estado e permissões; não foi alterada.
+
+Verificação: 89 testes Node, lint, formatação e exportação Android passaram
+(`/tmp/marketplace-return-delivery-android`), incluindo validação de ações e moradas,
+contratos das modalidades, compensação de relógio e ausência de repetição de
+operações. A verificação no Expo Go continua necessária: aprovar uma devolução,
+escolher modalidade, consultar acompanhamento e confirmar o artigo na loja ou
+com o entregador. Os testes não executam estas operações numa encomenda real.
+
+Próxima etapa: validar a entrega/recolha no dispositivo e acompanhar a receção e
+inspeção do produto. Reagendamento e cancelamento operacional continuam a cargo
+do Centro e da transportadora.
+
+### Ordem dos cartões no detalhe da devolução
+
+O detalhe apresenta estado e referência, resposta e instruções, modalidade e
+acompanhamento, conversa, produto e motivo, anexos, histórico e cancelamento.
+Esta ordem coloca a próxima ação antes dos dados de consulta e mantém os anexos
+junto do motivo. As condições de visibilidade e permissões existentes mantêm-se.
+O cancelamento continua no fim e apenas quando autorizado pela API.
+
+Validação deste ajuste: testes Node, lint e formatação. A apresentação no
+dispositivo ainda deve ser confirmada no Expo Go, com e sem instruções ou
+logística disponível.
+
+### Consulta de reembolsos no mobile
+
+Em Perfil → Compras → **Os meus reembolsos**, o Cliente consulta a lista paginada
+(`GET /client/refunds?page=…&per_page=15`) e o detalhe
+(`GET /client/refunds/{id}`). A API cria o processo automaticamente quando o
+lojista aceita a devolução após a inspeção; o mobile não cria reembolsos nem
+inicia pagamentos. O valor e a moeda são sempre os devolvidos pela API.
+
+O detalhe apresenta primeiro estado e valor, depois notas da decisão ou falha,
+produto e ligação à devolução de origem, tentativas de pagamento e histórico
+cronológico. Só `REFUNDED` é apresentado como **Reembolsado**. `APPROVED` indica
+aprovação ainda a aguardar processamento. Cada tentativa tem estado próprio;
+uma tentativa falhada não substitui o estado atual do processo.
+
+As consultas exigem sessão de Cliente, desmontam os dados ao mudar de conta,
+atualizam ao regressar ao ecrã e permitem atualização manual. Há estados de
+carregamento, erro com nova consulta e lista vazia. O login aceita apenas o
+destino interno `refunds`, mantendo a lista de destinos autorizados. Os
+componentes de estrutura das devoluções foram reutilizados com textos próprios
+para carregamento e acessibilidade, preservando os valores padrão existentes.
+
+Verificação: **93 testes Node passaram**, incluindo rotas privadas, paginação,
+identificadores inválidos, preservação de erros, ausência de operações financeiras
+e distinção entre aprovação e pagamento confirmado. Lint, formatação e exportação
+Android passaram (`/tmp/marketplace-refunds-android`). Os testes usam transporte
+simulado; não alteram processos financeiros existentes.
+
+O utilizador confirmou no Expo Go o estado final Reembolsado e, num cenário de
+falha e recuperação, as duas tentativas e o estado final. O registo detalhado
+consta abaixo. Comparação de valores com o painel e navegação à devolução de
+origem não foram confirmadas explicitamente. O agente não efetuou pagamentos.
+
+### Apresentação do detalhe do reembolso
+
+O detalhe usa agora um componente de apresentação próprio, `RefundDetailContent`,
+para organizar a informação sem alterar as consultas, os valores ou os estados
+financeiros. A lista de reembolsos mantém a apresentação existente.
+
+O resumo destaca o valor e o estado, com referência e datas identificadas. Um
+bloco suave explica o estado atual; decisão e falha usam títulos e superfícies
+separados. O produto apresenta a quantidade junto da miniatura, e o acesso à
+devolução é uma linha de navegação com ícone e seta, com área de toque mínima de
+52 pontos. As tentativas separam número, estado, valor e data; o histórico usa
+um eixo contínuo e destaca o acontecimento mais recente. Cabeçalhos permitem
+quebra de linha para acomodar textos e tamanhos de letra maiores.
+
+Verificação: **93 testes passaram**, assim como lint, formatação e exportação
+Android (`/tmp/marketplace-refund-detail-design`). Os testes existentes verificam
+os contratos e estados; não comprovam o alinhamento visual. Falta validar o
+resultado no Expo Go, incluindo referências longas, notas extensas e texto
+ampliado nas definições do dispositivo.
+
+### Validação manual reportada — 14 de novembro de 2026
+
+Os resultados abaixo foram confirmados pelo utilizador no Expo Go em Android,
+com ações financeiras realizadas no painel do super-admin. O agente não observou
+diretamente o dispositivo nem executou essas operações financeiras.
+
+| Cenário                                              | Resultado reportado                                                                | Situação                   |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------- | -------------------------- |
+| Recolha da devolução por entregador e entrega à loja | O utilizador confirmou que os passos estavam realizados.                           | Confirmado pelo utilizador |
+| Conclusão do reembolso                               | O mobile apresentou **Reembolsado** após o processamento no painel.                | Confirmado pelo utilizador |
+| Falha numa tentativa financeira                      | O utilizador confirmou a apresentação da falha no mobile.                          | Confirmado pelo utilizador |
+| Recuperação no mesmo processo                        | **Tentativa 1: Falhou**, **Tentativa 2: Concluída**, estado final **Reembolsado**. | Confirmado pelo utilizador |
+
+O cenário de recuperação confirma a apresentação das duas tentativas com os
+respetivos resultados, sem substituir o estado atual pelo da tentativa anterior.
+Esta validação complementa os 93 testes automatizados da implementação; não
+constitui comprovação de liquidação bancária ou certificação da integração com
+o operador financeiro.
+
+Continuam por confirmar explicitamente: comparação do valor com o painel,
+navegação para a devolução de origem, apresentação com referências e notas longas
+e tamanho de texto ampliado. A confirmação do estado final não encerra essas
+verificações de apresentação e navegação.
+
+Próxima etapa proposta: validar a consulta da devolução de origem e a coerência
+dos valores apresentados no mobile e no painel, sem iniciar novas operações
+financeiras.
+
+### Apresentação do detalhe da devolução
+
+O detalhe mantém a ordem aprovada: resumo, resposta e instruções, logística,
+conversa, produto e motivo, anexos, histórico e cancelamento. Os cartões de
+apresentação estão em `ReturnDetailCards`, com cabeçalhos discretos e referências
+sem truncagem. A decisão, as orientações e o prazo indicado pelo Centro têm
+identificação própria; o prazo é apresentado sem recalcular elegibilidade.
+
+O produto agrupa a quantidade junto da miniatura e distingue motivo e descrição.
+A logística separa modalidade e estado das moradas, com destaque suave para o
+código de confirmação. O histórico do pedido e o acompanhamento logístico usam
+o mesmo eixo contínuo, com o acontecimento mais recente destacado. O cartão de
+cancelamento mantém confirmação, motivo e bloqueios anteriores. A conversa e os
+anexos mantêm os componentes existentes. As novas funções e estilos estão
+comentados em português.
+
+Verificação: **93 testes passaram**, lint, formatação e exportação Android
+(`/tmp/marketplace-return-detail-design`) passaram. As verificações automatizadas
+não comprovam alinhamento visual. Falta confirmar no Expo Go o detalhe com prazo,
+instruções e descrições extensas, entrega na loja e recolha por transportadora,
+incluindo fontes ampliadas. Nenhuma regra ou operação da API foi alterada.
+
+### Reclamações — primeira etapa no mobile
+
+O perfil do Cliente tem **As minhas reclamações**, com paginação real de 15
+registos e acesso ao detalhe. Para abrir uma reclamação, o Cliente entra no
+detalhe de uma compra e seleciona **Abrir reclamação**. O formulário reconsulta
+essa compra, pede a encomenda da loja, artigo opcional, categoria, assunto e
+descrição. Mudar de loja limpa o artigo anterior. O login reconhece apenas o
+destino interno autorizado `complaints` e os dados privados são desmontados ao
+mudar de conta.
+
+Contratos reutilizados, sem alterações na API:
+
+- `GET /client/complaints?page=…&per_page=15`: lista da conta autenticada.
+- `GET /client/complaints/{id}`: detalhe, descrição, origem e histórico.
+- `POST /client/complaints`: `order_id`, `order_item_id` opcional, `type`,
+  `subject` até 180 caracteres e `description` entre 10 e 5000 caracteres.
+- `PATCH /client/complaints/{id}/cancel`: motivo entre 5 e 1000 caracteres;
+  exige estado `OPEN` e ação `CANCEL`. A API revalida a propriedade e o estado.
+
+Categorias: produto, loja, entrega, pagamento e outro. A resolução da reclamação
+não é apresentada como reembolso. O detalhe mantém cancelamento no fim, com
+confirmação e motivo; não disponibiliza mensagens ou anexos nesta etapa.
+Estados de carregamento, erro e lista vazia têm textos próprios. Criação e
+cancelamento bloqueiam toques repetidos e não são repetidos automaticamente;
+um resultado incerto exige consultar o estado antes de novo envio.
+
+Verificação: **100 testes Node passaram**, incluindo associação entre loja e
+artigo, campos permitidos, limites, rotas privadas, paginação, estados e
+cancelamento autorizado. Lint, formatação e exportação Android passaram
+(`/tmp/marketplace-complaints-base`). Os testes usam transporte
+simulado e não criam reclamações numa conta real.
+
+Validação pendente no Expo Go: abrir uma reclamação a partir de uma compra,
+confirmar lista e detalhe, selecionar outra loja sem conservar o artigo antigo,
+cancelar uma reclamação ainda aberta e verificar o estado após análise no Centro.
+Próxima etapa: conversa e anexos. Nessa etapa a escrita só estará disponível em
+`WAITING_CUSTOMER`; em análise e nos estados finais ficará bloqueada, mantendo
+o histórico acessível. A abertura inicial da reclamação não recebe anexos na API.
+
+### Mini cartões de Compras no perfil
+
+A secção Compras do Cliente apresenta quatro mini cartões: Encomendas,
+Devoluções, Reembolsos e Reclamações. Cada cartão inclui ícone, título e descrição
+curta; toda a superfície abre o destino que já existia. A grelha usa duas colunas
+com espaçamento uniforme e cartões de altura mínima consistente, sem limitar a
+altura ou cortar os textos. Em janelas abaixo de 360 pontos ou com escala de
+fonte superior a 1,2, passa para uma coluna. O ajuste não altera as restantes
+secções do perfil nem a proteção das rotas privadas.
+
+Verificação: 100 testes existentes passaram; lint, formatação e exportação
+Android verificados nesta etapa (`/tmp/marketplace-profile-purchase-cards`).
+Não foram adicionados testes que apenas reproduzem os estilos. Falta confirmar
+no Expo Go o alinhamento e o toque nos quatro destinos, incluindo letras
+ampliadas e orientação do dispositivo. Código comentado em português.
+
+### Conversa e anexos das reclamações
+
+O detalhe da reclamação inclui a conversa com o Centro, reutilizando as bolhas,
+agrupamento por remetente, datas, seletor Android e visualização privada das
+devoluções. Um adaptador fornece as rotas, textos e regras específicos; o contrato
+padrão das devoluções mantém-se. Mensagens do super-admin são identificadas como
+Administração. O envio exige texto entre 2 e 5000 caracteres, mesmo com anexos;
+até 5 ficheiros de 10 MB cada, nos formatos JPG, PNG, WebP ou PDF.
+
+Apenas `WAITING_CUSTOMER` mostra o compositor. Em `OPEN` e `IN_REVIEW`, o cliente
+aguarda análise; em `RESOLVED`, `REJECTED` e `CANCELLED`, a conversa está encerrada.
+O histórico e os anexos continuam consultáveis. Estados desconhecidos não
+permitem responder. O detalhe reconsulta o estado a cada 15 segundos enquanto
+está focado e a aplicação ativa, ao regressar à aplicação e por atualização
+manual. As consultas periódicas conservam o rascunho quando o estado continua a
+permitir resposta. Ao fechar a escrita, o compositor é desmontado e as cópias
+locais do rascunho são libertadas pelo seletor existente.
+
+Uma falha na consulta do estado bloqueia o envio até nova verificação. Antes de
+cada envio, o serviço reconsulta a reclamação; a API também valida o estado no
+POST. Se a análise tiver sido retomada, não repete a mensagem. Esta atualização
+é periódica, não uma ligação em tempo real: pode haver até 15 segundos até a
+escrita desaparecer, mas o envio volta a verificar a permissão. O histórico de
+mensagens atualiza manualmente, ao regressar ao ecrã e ao mudar o estado.
+
+Contratos privados: `GET/POST /client/complaints/{id}/messages` e
+`GET /client/complaints/attachments/{id}`. O download constrói apenas esta rota
+conhecida, ignorando `download_url` para não enviar o token a outro destino.
+O multipart reutiliza o envio por bytes compatível com Expo 58. Envios incertos
+não são repetidos automaticamente: a interface consulta o histórico para
+procurar a mensagem antes de permitir voltar a editar. Cancelamento e envio
+bloqueiam-se mutuamente.
+
+Verificação: **107 testes passaram**, incluindo bloqueio por estado, revalidação
+antes do POST, texto e multipart, limites, histórico inválido, resposta perdida,
+rota privada dos anexos e regressões das devoluções. Lint, formatação e
+exportação Android passaram (`/tmp/marketplace-complaint-conversation`). Não foram
+enviadas mensagens nem ficheiros para contas reais pelo agente.
+
+Validação pendente no Expo Go: abrir a reclamação com pedido de informação,
+enviar texto e imagem/PDF, consultar os anexos e retomar a análise no Centro.
+Com o mobile aberto, confirmar que a escrita desaparece na atualização seguinte;
+voltar a pedir informação e confirmar que reaparece. Encerrar a reclamação e
+verificar que a conversa e os anexos permanecem em consulta.
+
+### Decisão final da reclamação
+
+Logo após o resumo, o detalhe apresenta **Decisão final** apenas em `RESOLVED`
+ou `REJECTED`. O cartão identifica a solução apresentada ou a justificação da
+rejeição, com texto selecionável e a respetiva data. Não aparece durante a
+análise nem quando o Cliente cancela a reclamação. A conversa continua acessível
+em consulta; este cartão não desencadeia devoluções ou reembolsos.
+
+A consulta privada do Cliente na Teste-api foi ampliada com `resolution` e
+`rejected_at`, aproveitando campos existentes. O mobile dá prioridade à decisão
+e data oficiais; para compatibilidade com a API anterior, pode usar as notas e
+a data do acontecimento final correspondente no histórico. Não usa notas de
+outros estados como desfecho. Se faltar a descrição, apresenta essa ausência
+explicitamente, sem inventar uma solução.
+
+Verificação mobile: **111 testes passaram**, lint, formatação e exportação
+Android (`/tmp/marketplace-complaint-final-decision`). Os testes incluem decisão
+oficial, alternativa pelo histórico fora de ordem, estados sem desfecho e dados
+ausentes. Na API, **46 testes e 657 asserções passaram**, incluindo resolução, rejeição
+e isolamento por proprietário em SQLite em memória; Pint passou. Falta validar o cartão no Expo Go com uma
+reclamação resolvida e outra rejeitada, comparando o texto com o painel.
+
+### Reclamações distintas na mesma compra — regra atual
+
+Substitui o bloqueio geral da encomenda definido na etapa anterior. Uma compra
+pode ter várias reclamações em curso se forem problemas de artigos ou categorias
+diferentes. O bloqueio aplica-se apenas à combinação **encomenda + artigo +
+categoria** em `OPEN`, `IN_REVIEW` ou `WAITING_CUSTOMER`.
+
+Sem artigo selecionado, a reclamação refere-se à encomenda inteira. Esse âmbito
+é distinto de um artigo específico: a mesma categoria pode ser reportada para
+outro artigo ou para a encomenda inteira. Após `RESOLVED`, `REJECTED` ou
+`CANCELLED`, pode ser aberta nova ocorrência da mesma combinação.
+
+A seleção `purpose=complaint` mantém compras com encomendas ativas. O detalhe
+continua a fornecer `can_open_complaint` e acrescenta `ongoing_complaints` com
+identificador, artigo e categoria das reclamações em curso. O formulário usa
+estes dados para mostrar um aviso, bloquear o envio repetido e permitir abrir
+a reclamação existente. Mudar o artigo ou categoria para uma combinação livre
+volta a permitir enviar. Os textos e as descrições das reclamações não são
+incluídos nesta informação de elegibilidade.
+
+A API também verifica a combinação sob bloqueio transacional da encomenda,
+rejeitando duplicações com HTTP 409 mesmo quando o formulário está desatualizado.
+As listas e históricos existentes mantêm-se; não foram alterados dados anteriores.
+
+Verificação: **117 testes mobile passaram**; na API, **54 testes e 826 asserções
+passaram**, incluindo combinação repetida, outros artigos, outras categorias,
+encomenda inteira, estados de encerramento e propriedade. Lint, Pint, formatação
+e exportação Android passaram (`/tmp/marketplace-complaint-scopes`). Os testes da
+API usam SQLite em memória; não simulam concorrência real entre transações MySQL.
+
+Validação pendente no Expo Go: selecionar uma combinação com reclamação em curso,
+verificar o aviso e abrir a reclamação existente. Mudar o artigo ou categoria e
+confirmar que permite enviar. Encerrar uma reclamação, atualizar os dados e
+confirmar que a mesma combinação volta a permitir nova ocorrência.
+
+### Dados pessoais
+
+Perfil → Dados pessoais consulta `/auth/me` e permite editar nome, email e
+telefone através de `PUT /auth/profile`. O tipo de conta é apenas consultável.
+Após guardar, a sessão é reconstruída com uma consulta completa, preservando
+permissões. As falhas conservam os campos e os envios não são repetidos
+automaticamente. Alterar contactos retira a verificação anterior na API.
+Validação: testes existentes e lint; falta validar edição e persistência no Expo Go.
+
+### Verificação de email em Dados pessoais
+
+O cartão consulta o email guardado e apresenta Verificado/Por verificar. O botão
+usa `POST /auth/email/verification-notification`, autenticado e limitado na API
+a três pedidos por minuto. O destinatário vem da conta, nunca do formulário.
+Reutiliza a notificação Laravel com ligação assinada e o endpoint de confirmação
+existente. Email já verificado não gera outra notificação. Atualizar estado
+reconsulta a API sem apagar os campos em edição.
+
+Verificação: 21 testes da API passaram (126 asserções), incluindo envio ao
+utilizador autenticado e ausência de reenvio após confirmação. A entrega SMTP e
+a acessibilidade do endereço da ligação no telemóvel precisam de validação real.
+A confirmação abre a resposta existente da API no navegador; depois o Cliente
+regressa ao mobile e atualiza o estado. Telefone permanece para etapa posterior.
+
+### Verificação do telefone por SMS
+
+Dados pessoais inclui o estado do telefone, envio/reenvio e confirmação do código.
+A API usa `POST /auth/phone/verification-code` e `POST /auth/verify-phone`.
+O destinatário é o telefone guardado; números angolanos com nove dígitos iniciados
+por 9 recebem +244. Outros números exigem indicativo internacional.
+A tabela `phone_verifications` guarda hash, telefone, validade de dez minutos e
+cinco tentativas. O reenvio exige 60 segundos; há também limite de três pedidos
+por minuto. Alterar o telefone invalida códigos anteriores. Falhas SMS devolvem
+erro, não confirmação de envio. Nenhum SMS real é enviado pelos testes.
+A confirmação e a receção no dispositivo continuam pendentes; requer configuração
+Twilio e execução da migração `2026_11_14_120000_create_phone_verifications_table`.
+
+A migração foi aplicada à API local nesta implementação. Verificação: 22 testes
+da API passaram (138 asserções), 117 testes mobile existentes passaram; lint,
+Pint e formatação passaram. Os testes não comprovam entrega real de SMS.
+
+### Tabs em Dados pessoais
+
+O ecrã usa duas tabs: Dados da conta e Verificações. O formulário mantém o
+rascunho no componente pai ao alternar. Verificações apresenta dois contactos
+expansíveis; apenas o contacto escolhido mostra as ações e, no telefone, o campo
+do código. Mudar de contacto limpa o código ao desmontar o componente, mas não
+altera os dados guardados. Tabs e contactos ficam bloqueados durante confirmação
+SMS; as tabs também ficam bloqueadas durante a gravação. Os controlos têm nomes
+e estados acessíveis e permitem crescer com o tamanho da fonte.
+Verificação: testes existentes, lint e exportação Android; a apresentação e
+alternância com rascunho continuam a exigir validação no Expo Go.
+
+Diagnóstico SMS: falhas do envio de verificação registam o evento
+`phone_verification_delivery_failed` na API, apenas com classificação de ligação,
+rejeição do operador ou configuração, estado HTTP e código numérico do operador.
+Não são registados telefone, conteúdo, código de confirmação ou credenciais.
+Esta observabilidade não repete envios nem altera os limites da verificação.
+
+### Segurança — alterar palavra-passe
+
+Perfil → Segurança abre o formulário com palavra-passe atual, nova e confirmação.
+Os campos ficam apenas em memória, permitem mostrar/ocultar individualmente e
+apresentam erros por campo. A validação exige oito caracteres, maiúscula,
+minúscula e número. Não se removem espaços das palavras-passe.
+`PUT /auth/password` recebe apenas os três campos oficiais e invalida o token
+atual após sucesso. O mobile elimina a sessão local sem chamar novamente logout
+e encaminha ao login. Falhas de rede não repetem a alteração automaticamente;
+um resultado incerto orienta a entrar novamente e verificar antes de repetir.
+
+Verificação: 120 testes mobile e 23 testes da API passaram (147 asserções na API),
+incluindo palavra-passe atual incorreta, confirmação diferente, persistência da
+nova palavra-passe e rejeição do token invalidado. Lint, Pint e formatação
+verificados. Os testes usam contas isoladas em SQLite em memória; nenhuma
+palavra-passe real foi alterada pelo agente. Falta validar no Expo Go a alteração
+e entrada com a nova palavra-passe. A validação SMS permanece pendente por decisão
+do utilizador, até regularização da conta do operador.
+
+### Gestão de moradas no perfil
+
+Perfil → Moradas permite listar, criar e editar endereços do Cliente, sem remoção.
+A lista mostra endereço, município, província e telefone; o formulário reutiliza
+as opções geográficas e o componente do checkout, agora com preenchimento inicial
+para edição. Os valores padrão conservam o fluxo de criação do checkout.
+A edição envia apenas município, endereço e telefone por PUT ao endpoint privado.
+As moradas históricas das compras não são editáveis por estas rotas da API.
+Envios repetidos ficam bloqueados; resultados incertos exigem voltar à lista e
+consultar antes de repetir. Ao mudar de conta, os dados privados são desmontados.
+
+Verificação: 121 testes mobile passaram, incluindo o contrato da edição e a
+exclusão de campos de proprietário. Testes da API de moradas e checkout foram
+executados com SQLite em memória. Lint e formatação verificados; exportação
+Android em `/tmp/marketplace-address-management`. Falta validar no Expo Go criar,
+editar, voltar à lista e escolher a morada no checkout ou recolha de devolução.
+
+### Caixa de notificações
+
+Perfil → Notificações apresenta tabs Todas/Não lidas, paginação oficial e
+contagem de não lidas. A leitura usa PATCH privado, individualmente ou para toda
+a caixa. Ao regressar ao ecrã, atualiza os dados. Mensagens ficam isoladas por
+conta e respostas tardias não navegam depois de sair do ecrã.
+Ações VIEW_ORDER_GROUP e VIEW_CLIENT_REFUND abrem apenas rotas internas com
+parâmetros validados. Outras notificações permanecem consultáveis sem navegação;
+URLs arbitrários não são seguidos. A marcação e abertura não são repetidas
+automaticamente em falhas. Os alertas push e preferências ficam para outra etapa.
+Verificação: testes mobile da caixa e regressões existentes, testes da API
+PlatformNotificationTest, lint, formatação e exportação Android. Falta validar
+no Expo Go filtros, leitura e acesso à compra/reembolso.
+
+### Apresentação da caixa de mensagens
+
+As notificações usam linhas de correio numa superfície única: ícone de envelope,
+título, prévia de duas linhas e data discreta. Não lidas recebem ponto azul e
+fundo leve. Toda a linha é acionável, substituindo os dois botões anteriores.
+O toque marca como lida e abre o destino reconhecido. Sem destino, apresenta o
+texto completo num leitor com deslocamento e fecho acessível; o conteúdo mantém-se
+aberto mesmo se a mensagem desaparecer do filtro Não lidas após a marcação.
+A API e os contratos de leitura mantêm-se. Validação: testes existentes, lint,
+formatação e exportação Android; falta verificar visualmente no Expo Go as
+mensagens longas, não lidas e o leitor em ecrãs pequenos.
+
+### Leitura da mensagem antes do processo relacionado
+
+Todos os tipos de notificação abrem primeiro o leitor com o título, data e texto
+original completos: encomendas, pagamentos, devoluções, reclamações, reembolsos
+ou outros assuntos. O toque marca a leitura sem navegar automaticamente.
+Quando existe uma ação reconhecida e válida, um botão separado permite abrir o
+processo. Atualmente são reconhecidos os destinos emitidos para compra global e
+reembolso do Cliente. Outros tipos permanecem integralmente legíveis, sem inventar
+referências nem seguir URLs externos. A navegação para outros processos depende
+de ações explícitas disponibilizadas pela API.
+Verificação: testes existentes, lint, formatação e exportação Android. Falta
+validar no Expo Go a leitura de mensagens de tipos diferentes e o botão opcional.
+
+### Preparação da versão Android de desenvolvimento
+
+Foi preparado o perfil APK interno `development` do EAS e o comando
+`npm run start:dev-client`. A instalação das dependências nativas de desenvolvimento e push
+ficou pendente devido a timeout no registo npm; o pedido de permissões, registo do dispositivo e
+receção de alertas ainda não estão integrados. O utilizador confirmou não ter
+projeto Firebase. A compilação depende desse projeto, da associação Expo e da
+revisão da pasta Android existente; nenhum APK foi gerado ou publicado.
+Consultar [os passos e requisitos](docs/android-development.md).
+
+Verificação da preparação: 124 testes existentes, lint e formatação passaram.
+A instalação e o build nativo não foram validados devido à rede e à configuração
+Firebase ainda inexistente. Nenhuma credencial foi criada ou enviada.
+
+Guia didático Firebase Android: [PDF](docs/guia-firebase-android.pdf) e
+[fonte editável](docs/guia-firebase-android.md). Guardado na documentação do projeto;
+quatro páginas, com configuração Firebase, ficheiros, credenciais, preparação e
+validação futura. Referências oficiais incluídas. O guia não executa a instalação.
+
+### Preferências de notificações no mobile
+
+A caixa inclui acesso a Preferências. O ecrã consulta a matriz oficial de
+`GET /notifications/preferences` e guarda uma combinação por ação através de
+PUT, enviando apenas evento, canal e estado. Os interruptores não inventam
+canais indisponíveis. Push permanece bloqueado com configuração pendente; SMS
+informa a dependência do operador. Uma preferência guardada não ativa a entrega.
+A caixa interna permanece ativa e os códigos de segurança são independentes.
+Após guardar ou falhar, o ecrã reconsulta a API, sem repetir a alteração
+silenciosamente. Os dados são isolados por conta. Código comentado em português.
+Validação: testes mobile, teste existente NotificationPreferenceTest da API,
+lint, formatação e exportação Android. Falta testar no Expo Go mudar uma
+preferência de email, sair, regressar e confirmar a persistência.
+
+### Favoritos de produtos por conta
+
+O detalhe de produto permite guardar e remover favoritos por um coração. A tab
+Favoritos consulta a lista paginada da conta e abre o produto pelo identificador
+original. Sem sessão, guardar encaminha para login; contas que não são Cliente
+não recebem a ação. O estado é reconsultado ao regressar ao detalhe.
+A API usa GET `/client/favorites`, GET/PUT/DELETE `/client/favorites/{product}`.
+A tabela product_favorites tem associação única por utilizador e produto. Guardar
+exige que o produto seja acessível no catálogo público. Remover elimina apenas
+a associação à conta. Nome e imagem guardados permitem consultar e remover um
+favorito depois de o produto ser desativado ou removido. Produto ativo não garante
+stock: a disponibilidade comercial é revalidada ao abrir o catálogo.
+A migração foi aplicada na API local. Testes mobile de contrato e testes da API
+verificam isolamento e preservação do produto. Não foram enviados favoritos para
+contas reais pelo agente. Falta validar no Expo Go guardar, regressar à lista,
+remover e consultar a mesma conta noutro dispositivo. Favoritos de lojas ficam
+para outra etapa; os indicadores agregados da home não foram integrados aqui.
+
+O favorito no detalhe do produto apresenta apenas o coração (contorno ou
+preenchido), incluindo para visitantes. A descrição mantém-se no nome acessível;
+a área de toque é de 48 pontos e o carregamento bloqueia novos toques.
+
+### Apresentação do detalhe do produto
+
+O detalhe aberto pela Home ou catálogo usa cabeçalho compacto com seta e coração,
+galeria sobre fundo neutro e contador da imagem selecionada. Categoria, nome e
+preço Desde têm hierarquia própria. Opções de compra apresentam loja, variante,
+preço e disponibilidade em grupos, seguidos dos controlos do carrinho existentes.
+A descrição aparece depois das opções de compra. Os textos permitem quebra de
+linha e os valores mantêm a origem e cálculo anteriores. Nenhuma regra de stock,
+preço ou carrinho foi alterada. Código visual comentado em português.
+Verificação: testes existentes, lint, formatação e exportação Android. Falta
+validar visualmente no Expo Go produtos com várias imagens, variantes e nomes
+longos, incluindo texto ampliado e a adição ao carrinho.
+
+A revisão de alinhamento do detalhe coloca o coração junto ao nome do produto,
+fora do cabeçalho de navegação. Nos cartões, loja e centro usam a mesma coluna;
+variante, preço e stock são agrupados com espaçamento uniforme. Preço e stock
+permitem quebra de linha em larguras menores. Adicionar ao carrinho e Ver carrinho
+passam a ocupar a largura do cartão. As regras de compra permanecem iguais.
+Verificação: testes existentes, lint, formatação e exportação Android. Falta
+confirmar a revisão no dispositivo, sobretudo cartões com nomes longos.
+
+O seletor de quantidade do detalhe usa agora ícones Ionicons de menos e mais em
+superfícies circulares de 48 pontos, com o valor centrado entre eles. Continua
+possível escrever a quantidade; os limites e validações anteriores mantêm-se.
+Os botões identificam as ações para leitores de ecrã e distinguem limites pelo
+estado desativado. Verificação: 127 testes existentes, lint, formatação e
+exportação Android; falta confirmar apresentação e toque no Expo Go.
+
+Ações de compra revistas: seletor de quantidade centrado, ícones menores e alvos
+de toque de 44 pontos. Adicionar ao carrinho usa botão arredondado de largura
+natural, e Ver carrinho é um link discreto centrado. O grupo mantém as regras de
+quantidade e stock. Verificação: 127 testes existentes, lint, formatação e
+exportação Android; falta confirmar a composição visual no Expo Go.
+
+### Quantidade direta no detalhe e acesso ao carrinho
+
+O detalhe remove o texto Quantidade e o botão Adicionar ao carrinho. Sem artigo,
+o seletor mostra 1 como apresentação inicial e o primeiro + adiciona uma unidade.
+Depois mostra a quantidade confirmada da variante no carrinho e cada toque envia
+a quantidade absoluta. Menos fica desativado em 1; não remove o artigo. A remoção
+continua na view do carrinho. O número é apenas leitura, evitando envios parciais
+ao escrever. Toques ficam bloqueados durante operações; falhas reconsultam o
+carrinho sem repetir mutações. Ver carrinho no detalhe, o atalho da Home e o separador inferior
+mostram alerta quando o total é zero, conservando o ecrã atual.
+Verificação: testes existentes, lint, formatação e exportação Android; falta
+validar o incremento real e os alertas no Expo Go. O acesso direto por outras
+rotas mantém o estado vazio existente como alternativa segura.
+
+O seletor direto apresenta Total deste artigo para a variante existente no
+carrinho, usando `subtotal` devolvido pela API. Quantidade e total mudam juntos
+após a confirmação; durante a operação indica atualização. Não multiplica o
+preço antigo do catálogo nem mistura o subtotal do artigo com o total global.
+Validação: testes existentes e lint; falta confirmar no Expo Go ao aumentar e
+diminuir quantidades, incluindo ofertas promocionais.
+
+### Contador de artigos e unidades
+
+Os contadores da Home e da barra inferior usam agora o número de linhas de
+artigos, não a soma das quantidades. O resumo do carrinho distingue os dois:
+1 artigo com quantidade 2 aparece como “1 artigo · 2 unidades”. A quantidade e
+os totais financeiros continuam a usar os valores da API. Teste de regressão
+inclui várias unidades do mesmo artigo e artigos de lojas diferentes.
+
+### MVP — preparação de encomendas do lojista
+
+O atalho Encomendas do painel store-owner abre lista paginada e filtrada por
+estado comercial, com acesso ao detalhe. A área exige supplier-orders.view,
+além do papel protegido no grupo de rotas, e desmonta dados ao trocar de conta.
+O detalhe apresenta loja, cliente, modalidade, produtos históricos, totais e
+histórico de preparação. Iniciar preparação e Marcar como pronta exigem
+supplier-orders.fulfillment e a respetiva allowed_action da API, com confirmação
+explícita. A API revalida propriedade, pagamento e estado antes de cada PATCH.
+Falhas não repetem transições; um resultado incerto exige consulta do estado.
+
+Contratos: GET /supplier/orders, GET /supplier/orders/{id}, PATCH
+/{id}/start-preparation e PATCH /{id}/ready-for-pickup sob o mesmo prefixo.
+Nesta etapa não se expõem códigos de recolha nem operações de passagem ao
+entregador. Produtos, lojas e arrendamentos continuam fora desta integração.
+Não há alterações de contrato ou dados reais na API.
+
+Verificação: 131 testes mobile passaram, incluindo rotas privadas, filtros,
+permissões, ações e ausência de repetição de mutações. Lint, formatação e
+exportação Android verificados. Os testes existentes MerchantDashboardTest da
+API complementam a verificação de propriedade e transições. Falta validar no
+Expo Go com uma conta lojista autorizada e uma encomenda paga de demonstração.
+Próxima etapa: passagem ao entregador e área móvel do entregador, após validar
+lista, detalhe, início de preparação e marcação como pronta.
+
+### MVP — passagem da encomenda ao entregador
+
+O mobile do lojista concentra-se na operação diária: encomendas, preparação e
+passagem do pacote. Criação de produtos/variantes, gestão do catálogo e configuração
+da loja ficam no painel web.
+
+A conta de tipo `Entregador` abre a área privada `/(delivery)/delivery` após login.
+A proteção usa o tipo de conta exigido pela API logística, sem inventar um papel
+RBAC. A API continua a verificar conta ativa, vínculo e atribuição. A lista é
+paginada, consulta apenas entregas atribuídas e atualiza ao regressar do detalhe.
+O detalhe apresenta estado, loja, contacto, destinatário, produtos e histórico.
+
+Fluxo desta etapa:
+
+1. A transportadora atribui a entrega no painel web e o lojista marca o pedido como pronto.
+2. O entregador abre o detalhe e confirma **Iniciar recolha**.
+3. O lojista atualiza a encomenda e confirma **Entrega ao entregador**, ao passar o pacote.
+4. O lojista gera um novo código de recolha e apresenta os seis algarismos ao entregador.
+5. O entregador atualiza o detalhe, escolhe **Confirmar recolha** e introduz o código.
+6. Ambos atualizam o detalhe para verificar a passagem e a recolha.
+
+Contratos existentes: GET `/delivery-person/deliveries`, GET
+`/delivery-person/deliveries/{id}`, PATCH `/{id}/start-pickup` e
+PATCH `/{id}/confirm-pickup`. No lojista, PATCH
+`/supplier/orders/{id}/confirm-handover` e POST
+`/supplier/orders/{id}/pickup-code/regenerate`.
+
+Ações dependem de `allowed_actions`; as operações do lojista também exigem
+`supplier-orders.fulfillment`. O código gerado fica apenas em memória, com a data
+de validade informada pela API; não é guardado no dispositivo nem registado em logs.
+Atualizar/sair do detalhe elimina a apresentação do código. Regenerar invalida o
+anterior. A validação, expiração e limite de tentativas continuam no servidor.
+Confirmações têm bloqueio de envio duplicado; falhas incertas exigem consulta
+antes de repetir e não originam novas tentativas automáticas.
+
+Verificação: 136 testes mobile passaram; lint e formatação sem erros. Os testes
+existentes `MerchantDashboardTest` e `DeliveryPersonPanelTest` da API passaram:
+17 testes, 191 asserções, com base de testes isolada. Exportação Android validada.
+Não foram alterados contratos da API nem encomendas reais.
+
+Pendente: executar o fluxo acima no Expo Go com duas contas e uma encomenda de
+apresentação. Transporte até ao cliente, confirmação de recebimento e comunicação
+de falhas serão integrados numa etapa seguinte; as ações dessa etapa não estão
+expostas neste ecrã.
+
+### Apresentação das encomendas do lojista
+
+A lista apresenta filtros horizontais por estado e cartões integralmente tocáveis,
+com referência, estado, loja, data e total. Cliente, modalidade e quantidade
+ficam no detalhe, evitando repetição de informação na lista. Os filtros usam
+cantos de 8 pontos e os cartões da lista de 12 pontos.
+Os filtros mantêm os mesmos estados e paginação da API. No detalhe, a identificação
+precede as ações; produtos têm divisórias leves, valores alinham rótulos e montantes,
+e o histórico reutiliza a linha temporal existente. O aviso genérico de espera não
+aparece quando há ações de passagem ao entregador disponíveis para o lojista.
+
+Os componentes visuais ficam em `MerchantOrderCards.js`, com comentários sobre a
+finalidade de cada componente. Não há alterações na API, nos cálculos dos valores
+ou nas regras de autorização e confirmação. Referências e nomes podem quebrar
+linha; filtros têm área de toque mínima de 44 pontos.
+
+Validação: 136 testes existentes passaram, lint e formatação sem erros e exportação
+Android concluída. Falta validar a apresentação e a navegação no Expo Go,
+incluindo nomes extensos e texto ampliado. Não foram criados testes que apenas
+reproduzem os estilos visuais.
+
+### Detalhe da encomenda do lojista — organização visual
+
+O detalhe apresenta um resumo compacto com referência, estado, data e loja.
+O resumo usa uma base azul suave e rodapé branco para a loja. A ação operacional
+surge a seguir, com ícone maior, cabeçalho próprio e contorno de destaque.
+Cliente e modalidade aparecem em dois blocos lado a lado quando a largura é de
+pelo menos 390 pontos e a escala de fonte não ultrapassa 1,2; nos restantes casos
+aparecem em coluna. Os produtos usam fotografia numa base suave e quantidade
+em selo, com subtotal alinhado à direita. O total surge numa faixa azul de alto
+contraste. O histórico permanece no final, sem contorno nem sombra, em linha
+temporal. Os restantes cartões têm sombras suaves. As secções têm cantos de
+12 pontos, linhas flexíveis e texto sem truncagem para referências extensas.
+
+`MerchantDetailSection` uniformiza a apresentação apenas nesta área.
+`PickupActions` aceita um componente `Panel` opcional; o lojista usa o novo
+painel e o entregador mantém o painel original. Os pedidos, permissões,
+confirmações e tratamento de falhas não mudaram. A lista mantém a organização
+compacta definida na etapa anterior.
+
+Validação: 136 testes mobile passaram; lint, formatação e exportação Android
+verificados. Falta conferir no Expo Go os estados de preparação e recolha,
+a leitura com texto ampliado e a disposição dos produtos. Nenhuma encomenda
+real foi modificada durante a validação.
+
+### MVP — transporte e entrega ao cliente
+
+Depois da recolha confirmada na loja, o Entregador pode iniciar o transporte e
+concluir a entrega no mesmo detalhe. O ecrã apresenta o nome, telefone, morada e
+município devolvidos no `destination` da API; não reconstrói nem completa a morada
+localmente.
+
+Fluxo desta etapa:
+
+1. `PICKED_UP` disponibiliza `START_TRANSIT` e o Entregador confirma a saída.
+2. A API muda a entrega para `IN_TRANSIT` e disponibiliza `CONFIRM_DELIVERY`.
+3. No destino, o Entregador regista o nome de quem recebeu e os seis algarismos
+   apresentados pelo Cliente.
+4. A API valida o código, conclui a entrega e devolve o estado `DELIVERED`.
+5. O detalhe passa a consulta e informa que não existem outras ações.
+
+Contratos existentes: PATCH `/delivery-person/deliveries/{id}/start-transit` e
+PATCH `/delivery-person/deliveries/{id}/confirm-delivery`. As duas operações
+dependem de `allowed_actions`. A confirmação envia exclusivamente
+`recipient_name` e `confirmation_code`; o código fica apenas no estado transitório
+do formulário e é limpo ao voltar, concluir ou abandonar o ecrã. Um erro de rede
+ou do servidor com resultado incerto exige consulta do estado antes de nova
+tentativa, evitando entregas duplicadas.
+
+Verificação: 137 testes mobile passaram e o lint direcionado aos ficheiros
+alterados não encontrou erros. Os 10 testes de `DeliveryPersonPanelTest` da API
+passaram com 103 asserções. Falta validar no Expo Go com uma entrega de
+apresentação. O tratamento de falhas operacionais continua reservado para a
+próxima etapa.
+
+### Apresentação operacional das entregas
+
+A área do Entregador deixou de reutilizar cartões genéricos. A lista resume
+estado, referência, percurso Loja → Cliente, morada e quantidade, mantendo todo o
+cartão como área de navegação. No detalhe, a referência e o progresso aparecem
+primeiro; a ação autorizada recebe destaque; origem, destino e contactos formam
+uma rota visual; produtos usam linhas compactas com fotografia; e os eventos
+aparecem numa linha temporal contínua.
+
+Os novos componentes são exclusivamente visuais. Endpoints, `allowed_actions`,
+validação dos códigos, transições e tratamento de erros permanecem inalterados.
+Textos longos podem quebrar linha e moradas/telefones continuam selecionáveis.
+Validação: 137 testes passaram, lint e formatação dos ficheiros alterados não
+encontraram erros e a exportação Android foi concluída. Falta a validação visual
+no Expo Go com texto ampliado e dados reais de diferentes comprimentos.
+
+### MVP — levantamento pelo cliente e fecho do fluxo operacional
+
+O Lojista passa a concluir presencialmente o levantamento em loja. Quando a
+encomenda está pronta e a modalidade é levantamento, a API devolve
+`CONFIRM_CUSTOMER_PICKUP` e o detalhe apresenta **Confirmar levantamento** com
+campo para os seis algarismos apresentados pelo Cliente. A confirmação envia
+apenas `confirmation_code`; a API valida o código, muda a encomenda para
+`COLLECTED_BY_CLIENT` e regista a receção da compra.
+
+Contrato: PATCH `/supplier/orders/{id}/confirm-customer-pickup`, dependente de
+`allowed_actions` e `supplier-orders.fulfillment`. A preparação, a passagem ao
+entregador e a regeneração do código mantêm os contratos anteriores; o detalhe
+mantém visível uma única operação por vez.
+
+O Entregador passa a comunicar falhas e a confirmar a devolução à loja. O painel
+**Problema na entrega** aceita motivo obrigatório até 2000 caracteres e envia
+`reason` para PATCH `/delivery-person/deliveries/{id}/report-failure`.
+`REPORT_FAILURE` fica disponível em recolha pendente, recolhida, trânsito e
+regresso à loja; a transportadora recebe a notificação e decide o próximo passo.
+Quando o estado é `RETURNING_TO_STORE`, o detalhe apresenta **Confirmar
+devolução**, que pede o nome de quem recebeu na loja e envia `recipient_name`
+para PATCH `/delivery-person/deliveries/{id}/confirm-return-to-store`.
+
+Fluxo do Lojista:
+
+1. O Cliente gera o código de levantamento na compra.
+2. O Lojista abre a encomenda e escolhe **Confirmar levantamento**.
+3. Introduz os seis algarismos e confirma; a encomenda fica `COLLECTED_BY_CLIENT`.
+
+Fluxo do Entregador com falha:
+
+1. Em qualquer estado com ação disponível, escolhe **Comunicar falha** e descreve o motivo.
+2. A entrega fica `DELIVERY_FAILED` e o painel deixa de oferecer ações; a transportadora reorienta.
+3. Se a encomenda regressar à loja, o Entregador usa **Confirmar devolução** com o nome de quem recebeu.
+
+As operações dependem de `allowed_actions`, têm confirmação explícita e bloqueio
+de envio duplicado; um resultado incerto exige consulta do estado antes de
+repetir. Motivos e códigos não são guardados no dispositivo.
+
+Verificação: 140 testes mobile passaram, incluindo os novos contratos, validação
+de campos, ausência de campos extra e não repetição automática; lint e
+formatação sem erros. `DeliveryPersonPanelTest` e `MerchantDashboardTest` da
+Teste-api passaram com 17 testes e 191 asserções. Falta validar no Expo Go com
+uma compra de levantamento e uma entrega com falha; nenhuma conta ou encomenda
+real foi alterada.
+
+### MVP — devoluções do Entregador
+
+O painel do Entregador passa a mostrar as recolhas reversas atribuídas. O
+atalho **Ver devoluções atribuídas** abre uma lista paginada, com filtro por
+estado, e o detalhe apresenta resumo, rota Cliente → Loja, produto, quantidade,
+motivo e histórico. Esta área usa os contratos de devolução, que já existiam na
+Teste-api, sem criar estados novos.
+
+Fluxo:
+
+1. A transportadora aceita a devolução e atribui-a ao Entregador.
+2. Ao chegar ao Cliente, o Entregador pede os seis algarismos e confirma
+   **Confirmar recolha**.
+3. Sai com o produto e confirma **Iniciar transporte**.
+4. Na loja, valida o código emitido pelo Lojista e confirma **Confirmar entrega
+   na loja**.
+
+Contratos: GET `/delivery-person/return-deliveries`, GET `/{id}`, PATCH
+`/{id}/confirm-pickup`, PATCH `/{id}/start-transit` e PATCH
+`/{id}/confirm-store-delivery`. As ações dependem de `allowed_actions`; os
+códigos têm seis algarismos e os pedidos enviam apenas `confirmation_code` ou
+corpo vazio. As transições têm confirmação explícita e bloqueio de envio
+duplicado; um resultado incerto exige consulta do estado antes de repetir.
+
+Verificação: 144 testes mobile passaram, incluindo filtros, referências,
+validação dos códigos, campos enviados, não repetição automática e rótulos de
+estado; lint e formatação sem erros. `ClientReviewTest` da Teste-api passou com
+49 testes e 715 asserções. Falta validar no Expo Go com a recolha
+`RDL-01M86ZW6V5E454TTZEP9SNDPFH`, agendada para 26/11; nenhuma conta ou
+encomenda real foi alterada.

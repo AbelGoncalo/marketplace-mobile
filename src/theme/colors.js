@@ -1,0 +1,23 @@
+/** Paleta da identidade visual Ponto Certo. */
+export const colors = {
+  primary: '#304D8F',
+  primaryDark: '#070B25',
+  primarySoft: '#EAF0FA',
+  accent: '#FFD400',
+  accentPressed: '#E6BF00',
+  danger: '#ED111C',
+  dangerSoft: '#FDE8EA',
+  success: '#178653',
+  successSoft: '#E5F5ED',
+  warning: '#A86400',
+  warningSoft: '#FFF3D6',
+  background: '#F5F6F8',
+  surface: '#FFFFFF',
+  text: '#1E2430',
+  textMuted: '#687083',
+  textOnPrimary: '#FFFFFF',
+  textOnAccent: '#17213A',
+  border: '#DDE1E8',
+  disabled: '#B9BFCA',
+  overlay: 'rgba(20, 30, 54, 0.45)',
+};

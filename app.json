@@ -1,0 +1,21 @@
+{
+  "expo": {
+    "name": "Ponto Certo",
+    "slug": "marketplace-mobile",
+    "scheme": "ponto-certo",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.khs.marketplace"
+    },
+    "android": {
+      "package": "com.khs.marketplace",
+      "adaptiveIcon": {
+        "backgroundColor": "#172B4D"
+      }
+    },
+    "plugins": ["expo-router", "expo-secure-store"]
+  }
+}

@@ -1,0 +1,21 @@
+// Executa as regressões de cada etapa com o runner nativo do Node.
+require('./session.test.cjs');
+require('./catalog.test.cjs');
+require('./cart.test.cjs');
+require('./checkout.test.cjs');
+require('./orders.test.cjs');
+require('./reviews.test.cjs');
+require('./returns.test.cjs');
+require('./attachments.test.cjs');
+require('./return-messages.test.cjs');
+require('./return-delivery.test.cjs');
+require('./refunds.test.cjs');
+require('./complaints.test.cjs');
+require('./complaint-messages.test.cjs');
+require('./complaint-decision.test.cjs');
+require('./password-change.test.cjs');
+require('./notifications.test.cjs');
+require('./favorites.test.cjs');
+require('./merchant-orders.test.cjs');
+require('./pickup.test.cjs');
+require('./delivery-returns.test.cjs');
