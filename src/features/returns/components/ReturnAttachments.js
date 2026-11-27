@@ -38,6 +38,8 @@ export function ReturnAttachmentPicker({
   onPicking,
   embedded = false,
   compact = false,
+  // Permite personalizar só a ação de anexar, mantendo seleção, limites e limpeza partilhados.
+  Action = Button,
 }) {
   const [error, setError] = useState('');
   const [picking, setPicking] = useState(false);
@@ -142,7 +144,7 @@ export function ReturnAttachmentPicker({
           {error}
         </AppText>
       ) : null}
-      <Button
+      <Action
         label={
           compact
             ? `Anexar ficheiros (${files.length}/${MAX_ATTACHMENTS})`

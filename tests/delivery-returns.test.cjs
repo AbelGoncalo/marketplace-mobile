@@ -85,3 +85,32 @@ test('falha de rede não repete a transição e os estados mantêm rótulos ofic
   assert.equal(api.returnDeliveryStatus('DELIVERED'), 'Entregue na loja');
   assert.equal(api.returnDeliveryStatus('unexpected'), 'Estado em atualização');
 });
+
+test('recolha retirada da conta apresenta indisponibilidade sem expor a mensagem crua do 404', async () => {
+  const calls = [];
+  const api = await service('src/features/delivery/services/deliveryReturnsApi.js', async (path, options) => {
+    calls.push({ path, options });
+    throw { status: 404, message: 'Recurso solicitado não foi encontrado' };
+  });
+  assert.equal(await api.getReturnDelivery('jwt', 4), null);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].path, '/delivery-person/return-deliveries/4');
+  assert.equal(calls[0].options.token, 'jwt');
+});
+test('indisponibilidade não esconde falhas de rede, sessão, permissão ou servidor', async () => {
+  for (const status of [0, 401, 403, 422, 500]) {
+    let calls = 0;
+    const failure = { status, message: 'Falha original' };
+    const api = await service('src/features/delivery/services/deliveryReturnsApi.js', async () => { calls++; throw failure; });
+    await assert.rejects(api.getReturnDelivery('jwt', 4), (error) => error === failure);
+    assert.equal(calls, 1);
+  }
+});
+test('nova atribuição permite consultar novamente a mesma recolha sem memorizar o 404', async () => {
+  let calls = 0;
+  const delivery = { id: 4, status: 'AWAITING_PICKUP', allowed_actions: ['CONFIRM_PICKUP'] };
+  const api = await service('src/features/delivery/services/deliveryReturnsApi.js', async () => { calls++; if (calls === 1) throw { status: 404 }; return delivery; });
+  assert.equal(await api.getReturnDelivery('jwt', 4), null);
+  assert.equal(await api.getReturnDelivery('jwt', 4), delivery);
+  assert.equal(calls, 2);
+});

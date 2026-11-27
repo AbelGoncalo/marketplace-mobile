@@ -19,3 +19,4 @@ require('./favorites.test.cjs');
 require('./merchant-orders.test.cjs');
 require('./pickup.test.cjs');
 require('./delivery-returns.test.cjs');
+require('./return-failure.test.cjs');

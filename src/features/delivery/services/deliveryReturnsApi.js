@@ -31,9 +31,15 @@ export function getReturnDeliveries(token, page = 1, status = '') {
     { token },
   );
 }
-/** Obtém a recolha e as ações autorizadas pelo servidor. */
+/** Devolve null quando a recolha já não está acessível à conta; preserva erros de rede e sessão. */
 export function getReturnDelivery(token, id) {
-  return apiRequest(`/delivery-person/return-deliveries/${identifier(id)}`, { token });
+  return apiRequest(`/delivery-person/return-deliveries/${identifier(id)}`, { token }).catch(
+    (error) => {
+      // Uma nova tentativa pode retirar a atribuição anterior; não revela dados nem a causa de outro 404.
+      if (error.status === 404) return null;
+      throw error;
+    },
+  );
 }
 /** Executa uma única transição autorizada, enviando apenas os campos aceites. */
 export function returnDeliveryAction(token, delivery, action, code = '') {
