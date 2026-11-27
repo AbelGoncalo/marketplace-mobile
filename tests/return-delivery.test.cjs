@@ -108,3 +108,47 @@ test('consulta logística valida o identificador e traduz a entrega sem prometer
   assert.equal(service.returnDeliveryStatus('DELIVERED'), 'Entregue à loja');
   assert.equal(service.returnDeliveryStatus('UNKNOWN'), 'Estado em atualização');
 });
+
+test('correção de morada exige a ação explícita do Centro e uma recolha falhada', async () => {
+  const service = await api(async () => {});
+  const delivery = { method: 'CARRIER_PICKUP', status: 'PICKUP_FAILED', allowed_actions: ['UPDATE_PICKUP_ADDRESS'] };
+  assert.equal(service.canCorrectPickupAddress(delivery), true);
+  assert.equal(service.canCorrectPickupAddress({ ...delivery, allowed_actions: [] }), false);
+  assert.equal(service.canCorrectPickupAddress({ ...delivery, status: 'AWAITING_PICKUP' }), false);
+  assert.equal(service.canCorrectPickupAddress({ ...delivery, method: 'STORE_DROPOFF' }), false);
+  assert.equal(service.canCorrectPickupAddress(null), false);
+  await assert.rejects(service.correctPickupAddress('jwt', request, { ...delivery, allowed_actions: [] }, 8));
+});
+test('correção reconsulta autorização e envia só a referência da morada num PATCH privado', async () => {
+  const delivery = { method: 'CARRIER_PICKUP', status: 'PICKUP_FAILED', allowed_actions: ['UPDATE_PICKUP_ADDRESS'] };
+  const calls = [];
+  const service = await api(async (path, options) => { calls.push({ path, options }); return delivery; });
+  await service.correctPickupAddress('jwt', request, delivery, '8');
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].path, '/client/returns/7/delivery');
+  assert.equal(calls[0].options.method, undefined);
+  assert.equal(calls[1].path, '/client/returns/7/pickup-address');
+  assert.equal(calls[1].options.method, 'PATCH');
+  assert.deepEqual(JSON.parse(calls[1].options.body), { pickup_address_id: 8 });
+  assert.ok(calls.every(({ options }) => options.token === 'jwt'));
+});
+test('referências inválidas e autorização retirada não permitem corrigir a morada', async () => {
+  const delivery = { method: 'CARRIER_PICKUP', status: 'PICKUP_FAILED', allowed_actions: ['UPDATE_PICKUP_ADDRESS'] };
+  let calls = 0;
+  const service = await api(async () => { calls++; return { ...delivery, allowed_actions: [] }; });
+  for (const addressId of ['../8', 0, '9007199254740992']) await assert.rejects(service.correctPickupAddress('jwt', request, delivery, addressId));
+  await assert.rejects(service.correctPickupAddress('jwt', { id: '../7' }, delivery, 8));
+  assert.equal(calls, 0);
+  await assert.rejects(service.correctPickupAddress('jwt', request, delivery, 8), (error) => error.requiresRefresh === true);
+  assert.equal(calls, 1);
+});
+test('falha ou resposta incerta na correção não repete o PATCH automaticamente', async () => {
+  const delivery = { method: 'CARRIER_PICKUP', status: 'PICKUP_FAILED', allowed_actions: ['UPDATE_PICKUP_ADDRESS'] };
+  for (const status of [0, 401, 403, 409, 422, 500]) {
+    let writes = 0;
+    const failure = { status };
+    const service = await api(async (path, options) => { if (options.method === 'PATCH') { writes++; throw failure; } return delivery; });
+    await assert.rejects(service.correctPickupAddress('jwt', request, delivery, 8), (error) => error === failure);
+    assert.equal(writes, 1);
+  }
+});

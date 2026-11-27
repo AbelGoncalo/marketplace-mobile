@@ -1,3 +1,5 @@
+import { useFocusEffect } from 'expo-router';
+import { PickupAddressCorrection } from '@/features/returns/components/PickupAddressCorrection';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, StyleSheet, View } from 'react-native';
 
@@ -9,6 +11,7 @@ import {
 } from '@/features/returns/components/ReturnDetailCards';
 import {
   chooseReturnDelivery,
+  canCorrectPickupAddress,
   getReturnDelivery,
   issueReturnDeliveryCode,
   returnDeliveryStatus,
@@ -33,12 +36,42 @@ function DeliveryDetails({ token, request, disabled, onBusy, onRefresh }) {
   );
   const query = useApiQuery(loader);
   const delivery = query.data;
+  // Apresenta a recusa como relato pendente de análise, sem atribuir culpa ao Cliente.
+  const refusalReported =
+    delivery?.status === 'PICKUP_FAILED' && delivery?.failure_reason === 'CLIENT_REFUSED';
+  const [editingCorrection, setEditingCorrection] = useState(false);
+  const [correctionNotice, setCorrectionNotice] = useState('');
+  const refreshDelivery = query.refresh;
+  const awaitsCorrectionDecision =
+    delivery?.status === 'PICKUP_FAILED' && delivery?.failure_reason === 'ADDRESS_NOT_FOUND';
+  // Só consulta periodicamente esta pendência, com o ecrã visível e sem interromper um formulário.
+  useFocusEffect(
+    useCallback(() => {
+      if (!awaitsCorrectionDecision || disabled || editingCorrection) return;
+      const refreshIfIdle = () => {
+        if (AppState.currentState === 'active') refreshDelivery();
+      };
+      const timer = setInterval(refreshIfIdle, 30000);
+      const subscription = AppState.addEventListener('change', (state) => {
+        if (state === 'active') refreshIfIdle();
+      });
+      return () => {
+        clearInterval(timer);
+        subscription.remove();
+      };
+    }, [awaitsCorrectionDecision, disabled, editingCorrection, refreshDelivery]),
+  );
   const canChoose =
     request.status === 'AWAITING_RETURN' &&
     (request.allowed_actions?.includes('CHOOSE_DELIVERY_METHOD') ||
       delivery?.allowed_actions?.includes('SELECT_RETURN_METHOD'));
   return (
     <ReturnDetailPanel title="Como devolver o produto" icon="cube-outline">
+      {correctionNotice ? (
+        <AppText accessibilityRole="alert" color="primary">
+          {correctionNotice}
+        </AppText>
+      ) : null}
       <ReturnFeedback {...query} onRetry={query.refresh} />
       {delivery ? (
         <>
@@ -51,11 +84,37 @@ function DeliveryDetails({ token, request, disabled, onBusy, onRefresh }) {
             </AppText>
             <Badge label={returnDeliveryStatus(delivery.status)} variant="info" />
             {delivery.workflow?.message ? (
-              <AppText color="muted" style={styles.description}>
-                {delivery.workflow.message}
-              </AppText>
+              <View style={refusalReported ? styles.inset : undefined}>
+                {refusalReported ? (
+                  <AppText variant="bodyStrong" color="primary">
+                    Recolha por esclarecer
+                  </AppText>
+                ) : null}
+                <AppText color="muted" style={styles.description}>
+                  {delivery.workflow.message}
+                </AppText>
+              </View>
             ) : null}
           </View>
+          {canCorrectPickupAddress(delivery) ? (
+            <PickupAddressCorrection
+              token={token}
+              request={request}
+              delivery={delivery}
+              disabled={disabled}
+              onBusy={onBusy}
+              onEditing={setEditingCorrection}
+              onRefresh={() => {
+                setEditingCorrection(false);
+                query.refresh();
+              }}
+              onCorrected={() => {
+                setEditingCorrection(false);
+                setCorrectionNotice('Morada enviada ao Centro. Aguarda reagendamento da recolha.');
+                query.refresh();
+              }}
+            />
+          ) : null}
           {delivery.destination?.store?.name ? (
             <View style={styles.address}>
               <AppText variant="caption" color="muted">

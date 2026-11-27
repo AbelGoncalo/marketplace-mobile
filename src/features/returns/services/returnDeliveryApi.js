@@ -66,3 +66,32 @@ export function returnDeliveryStatus(status) {
     }[status] || 'Estado em atualização'
   );
 }
+
+/** A correção só surge quando a API a autoriza explicitamente para a recolha falhada. */
+export function canCorrectPickupAddress(delivery) {
+  return (
+    delivery?.method === 'CARRIER_PICKUP' &&
+    delivery.status === 'PICKUP_FAILED' &&
+    delivery.allowed_actions?.includes('UPDATE_PICKUP_ADDRESS') === true
+  );
+}
+/** Revalida a autorização e envia uma única correção; a API confirma a propriedade da morada. */
+export async function correctPickupAddress(token, request, delivery, addressId) {
+  if (!canCorrectPickupAddress(delivery))
+    throw new Error('O Centro ainda não solicitou a correção desta morada.');
+  const id = returnId(request.id);
+  const selected = returnId(addressId);
+  const current = await getReturnDelivery(token, id);
+  if (!canCorrectPickupAddress(current)) {
+    const error = new Error(
+      'O pedido de correção mudou. Atualize o acompanhamento antes de continuar.',
+    );
+    error.requiresRefresh = true;
+    throw error;
+  }
+  return apiRequest(`/client/returns/${id}/pickup-address`, {
+    token,
+    method: 'PATCH',
+    body: JSON.stringify({ pickup_address_id: selected }),
+  });
+}
