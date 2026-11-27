@@ -225,7 +225,9 @@ function Inbox({ token }) {
                   label={
                     notificationTarget(opened).pathname.includes('/refunds/')
                       ? 'Ver reembolso'
-                      : 'Ver encomenda'
+                      : notificationTarget(opened).pathname.includes('/returns/')
+                        ? 'Ver devolução'
+                        : 'Ver encomenda'
                   }
                   fullWidth
                   variant="outline"

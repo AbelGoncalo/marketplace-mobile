@@ -75,3 +75,14 @@ test('preferências guardam apenas uma combinação suportada e não aceitam can
   assert.throws(() => service.saveNotificationPreference('jwt', event, 'EMAIL', 'true'));
   assert.equal(calls.length, 2);
 });
+
+test('notificação de ocorrência abre somente a devolução identificada pela API', async () => {
+  const service = await api();
+  const target = service.notificationTarget({ data: { action: 'VIEW_CLIENT_RETURN', action_params: { return_request_id: '7' } } });
+  assert.equal(target.pathname, '/(customer)/returns/[id]');
+  assert.equal(target.params.id, 7);
+  for (const id of ['../7', '7/8', 0, -1, '9007199254740992', null, undefined]) {
+    assert.equal(service.notificationTarget({ data: { action: 'VIEW_CLIENT_RETURN', action_params: { return_request_id: id } } }), null);
+  }
+  assert.equal(service.notificationTarget({ data: { action: 'VIEW_CLIENT_RETURN', action_params: {} } }), null);
+});

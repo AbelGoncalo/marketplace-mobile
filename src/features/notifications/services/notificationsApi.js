@@ -36,5 +36,11 @@ export function notificationTarget(notification) {
     if (/^[1-9]\d*$/.test(String(id)) && Number.isSafeInteger(Number(id)))
       return { pathname: '/(customer)/refunds/[id]', params: { id: Number(id) } };
   }
+  // A API revalida a propriedade da devolução; o destino nunca usa URLs da mensagem.
+  if (data?.action === 'VIEW_CLIENT_RETURN') {
+    const id = data.action_params?.return_request_id;
+    if (/^[1-9]\d*$/.test(String(id)) && Number.isSafeInteger(Number(id)))
+      return { pathname: '/(customer)/returns/[id]', params: { id: Number(id) } };
+  }
   return null;
 }
