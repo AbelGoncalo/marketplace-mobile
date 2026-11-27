@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { orderDate } from '@/features/orders/utils/orderPresentation';
+import {
+  DeliveryActionRow,
+  deliveryActionIcons,
+} from '@/features/delivery/components/DeliveryCards';
 import { ReturnPanel } from '@/features/returns/components/ReturnLayout';
 import { AppText, Button, Input } from '@/shared/ui';
 
@@ -95,10 +99,10 @@ export function PickupActions({
               {issuedNotice}
             </AppText>
           ) : null}
-          <Button label="Concluir e atualizar" onPress={onRefresh} />
+          <Button label="Concluir e atualizar" fullWidth onPress={onRefresh} />
         </>
       ) : unknown ? (
-        <Button label="Consultar estado" onPress={onRefresh} />
+        <Button label="Consultar estado" fullWidth onPress={onRefresh} />
       ) : selected ? (
         <>
           {needsCode ? (
@@ -115,12 +119,14 @@ export function PickupActions({
           <AppText variant="bodyStrong">{selected.confirmation}</AppText>
           <Button
             label="Confirmar"
+            fullWidth
             loading={busy}
             disabled={needsCode && code.length !== 6}
             onPress={submit}
           />
           <Button
             label="Voltar"
+            fullWidth
             variant="outline"
             disabled={busy}
             onPress={() => {
@@ -131,17 +137,30 @@ export function PickupActions({
           />
         </>
       ) : (
-        actions.map((action) => (
-          <Button
-            key={action.action}
-            label={action.label}
-            variant={action.secondary ? 'outline' : 'primary'}
-            onPress={() => {
-              setSelected(action);
-              setError('');
-            }}
-          />
-        ))
+        actions.map((action) =>
+          action.secondary ? (
+            <Button
+              key={action.action}
+              label={action.label}
+              fullWidth
+              variant="outline"
+              onPress={() => {
+                setSelected(action);
+                setError('');
+              }}
+            />
+          ) : (
+            <DeliveryActionRow
+              key={action.action}
+              label={action.label}
+              icon={deliveryActionIcons[action.action]}
+              onPress={() => {
+                setSelected(action);
+                setError('');
+              }}
+            />
+          ),
+        )
       )}
     </Panel>
   );

@@ -1,4 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import {
+  DeliveryActionRow,
+  deliveryActionIcons,
+} from '@/features/delivery/components/DeliveryCards';
 import { ReturnPanel } from '@/features/returns/components/ReturnLayout';
 import { AppText, Button, Input } from '@/shared/ui';
 
@@ -75,7 +79,7 @@ export function DeliveryActions({ action, execute, onRefresh, onBusy, Panel = Re
         </AppText>
       ) : null}
       {unknown ? (
-        <Button label="Consultar estado" onPress={onRefresh} />
+        <Button label="Consultar estado" fullWidth onPress={onRefresh} />
       ) : confirming ? (
         <>
           {needsRecipient ? (
@@ -108,6 +112,7 @@ export function DeliveryActions({ action, execute, onRefresh, onBusy, Panel = Re
           </AppText>
           <Button
             label="Confirmar"
+            fullWidth
             loading={busy}
             disabled={
               (needsRecipient && !recipientName.trim()) || (isDelivery && code.length !== 6)
@@ -116,6 +121,7 @@ export function DeliveryActions({ action, execute, onRefresh, onBusy, Panel = Re
           />
           <Button
             label="Voltar"
+            fullWidth
             variant="outline"
             disabled={busy}
             onPress={() => {
@@ -127,7 +133,7 @@ export function DeliveryActions({ action, execute, onRefresh, onBusy, Panel = Re
           />
         </>
       ) : (
-        <Button
+        <DeliveryActionRow
           label={
             isDelivery
               ? 'Confirmar entrega'
@@ -135,6 +141,7 @@ export function DeliveryActions({ action, execute, onRefresh, onBusy, Panel = Re
                 ? 'Confirmar devolução'
                 : 'Iniciar transporte'
           }
+          icon={deliveryActionIcons[action]}
           onPress={() => setConfirming(true)}
         />
       )}

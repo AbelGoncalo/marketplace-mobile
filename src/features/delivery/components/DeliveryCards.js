@@ -172,6 +172,57 @@ export function DeliveryActionPanel({ title, children }) {
   );
 }
 
+/** Ícones de apresentação por transição; os estados continuam a vir da API. */
+export const deliveryActionIcons = {
+  START_PICKUP: 'arrow-forward',
+  START_TRANSIT: 'arrow-forward',
+  CONFIRM_PICKUP: 'checkmark',
+  CONFIRM_DELIVERY: 'checkmark',
+  CONFIRM_STORE_DELIVERY: 'checkmark',
+  CONFIRM_CUSTOMER_PICKUP: 'checkmark',
+  CONFIRM_HANDOVER: 'checkmark',
+  CONFIRM_RETURN_TO_STORE: 'return-down-back',
+  REPORT_FAILURE: 'alert',
+};
+
+/** Ação leve com ícone: linha suave que substitui o botão sólido no primeiro passo. */
+export function DeliveryActionRow({
+  label,
+  icon = 'arrow-forward',
+  variant = 'primary',
+  onPress,
+  disabled = false,
+}) {
+  const danger = variant === 'danger';
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.actionRow,
+        danger && styles.actionRowDanger,
+        disabled && { opacity: 0.45 },
+        pressed && (danger ? styles.actionRowDangerPressed : styles.actionRowPressed),
+      ]}
+    >
+      <View style={styles.actionRowIcon}>
+        <Ionicons name={icon} size={20} color={danger ? colors.danger : colors.primary} />
+      </View>
+      <AppText
+        variant="bodyStrong"
+        color={danger ? 'danger' : 'primary'}
+        style={styles.actionLabel}
+      >
+        {label}
+      </AppText>
+      <Ionicons name="chevron-forward" size={18} color={danger ? colors.danger : colors.primary} />
+    </Pressable>
+  );
+}
+
 /** Representa fisicamente o percurso Loja → Cliente e mantém contactos selecionáveis. */
 export function DeliveryRoute({ delivery }) {
   return (
@@ -412,4 +463,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
   },
+  actionRow: {
+    alignItems: 'center',
+    backgroundColor: colors.primarySoft,
+    borderColor: colors.primarySoft,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: spacing.sm,
+    minHeight: 56,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+  },
+  actionRowPressed: { backgroundColor: colors.surface, borderColor: colors.primary },
+  actionRowDanger: { backgroundColor: colors.dangerSoft, borderColor: colors.dangerSoft },
+  actionRowDangerPressed: { backgroundColor: colors.surface, borderColor: colors.danger },
+  actionRowIcon: {
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: radii.pill,
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
+  },
+  actionLabel: { flex: 1, minWidth: 0 },
 });

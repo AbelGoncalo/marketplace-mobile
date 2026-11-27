@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { DeliveryActionRow } from '@/features/delivery/components/DeliveryCards';
 import { ReturnPanel } from '@/features/returns/components/ReturnLayout';
 import { AppText, Button, Input } from '@/shared/ui';
 
@@ -61,7 +62,7 @@ export function DeliveryFailure({ execute, onRefresh, onBusy, Panel = ReturnPane
         </AppText>
       ) : null}
       {unknown ? (
-        <Button label="Consultar estado" onPress={onRefresh} />
+        <Button label="Consultar estado" fullWidth onPress={onRefresh} />
       ) : open ? (
         <>
           <Input
@@ -78,12 +79,14 @@ export function DeliveryFailure({ execute, onRefresh, onBusy, Panel = ReturnPane
           <AppText variant="bodyStrong">Registar esta falha na entrega?</AppText>
           <Button
             label="Confirmar falha"
+            fullWidth
             loading={busy}
             disabled={!reason.trim()}
             onPress={submit}
           />
           <Button
             label="Voltar"
+            fullWidth
             variant="outline"
             disabled={busy}
             onPress={() => {
@@ -94,9 +97,10 @@ export function DeliveryFailure({ execute, onRefresh, onBusy, Panel = ReturnPane
           />
         </>
       ) : (
-        <Button
+        <DeliveryActionRow
           label="Comunicar falha"
-          variant="outline"
+          variant="danger"
+          icon="alert"
           onPress={() => {
             setOpen(true);
             setError('');

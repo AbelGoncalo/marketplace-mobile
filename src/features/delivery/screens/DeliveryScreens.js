@@ -46,18 +46,12 @@ function DeliveryList({ token }) {
     <ReturnLayout
       title="As minhas entregas"
       subtitle="Recolhas e entregas atribuídas a si."
-      backTo="/(customer)/(tabs)/profile"
+      backTo="/(delivery)/delivery"
       onRefresh={query.refresh}
       refreshLabel="Atualizar entregas"
       busy={query.isLoading}
       scrollKey={page}
     >
-      <Button
-        label="Ver devoluções atribuídas"
-        variant="outline"
-        fullWidth
-        onPress={() => router.push('/(delivery)/delivery/returns')}
-      />
       <ReturnFeedback
         {...query}
         loadingText="A consultar entregas..."
@@ -106,7 +100,7 @@ function DeliveryDetail({ token, id }) {
   return (
     <ReturnLayout
       title="Detalhe da entrega"
-      backTo="/(delivery)/delivery"
+      backTo="/(delivery)/delivery/deliveries"
       onRefresh={query.refresh}
       refreshLabel="Atualizar entrega"
       busy={busy || query.isLoading}
@@ -161,7 +155,12 @@ function DeliveryDetail({ token, id }) {
                       : 'Não há ações disponíveis neste estado.'}
               </AppText>
               {delivery.operational_status === 'PICKUP_PENDING' ? (
-                <Button label="Atualizar estado" variant="outline" onPress={query.refresh} />
+                <Button
+                  label="Atualizar estado"
+                  fullWidth
+                  variant="outline"
+                  onPress={query.refresh}
+                />
               ) : null}
             </DeliverySection>
           )}
